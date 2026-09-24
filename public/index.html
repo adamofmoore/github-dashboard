@@ -77,11 +77,12 @@ input[type=date] { padding:4px 8px }
 
 section { padding:20px 0 8px; margin-top:8px }
 section > header { display:flex; align-items:baseline; gap:12px; margin-bottom:14px; flex-wrap:wrap }
+.grid2 section > header { flex-wrap:nowrap; min-height:24px } .grid2 section > header .sub { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0 } .grid2 .win-only { flex:none }
 section > header h2 { margin:0; font-size:15px; font-weight:600 }
 section > header .count { font-size:15px; font-weight:700; color:var(--ink) }
 section > header .sub { font-size:12.5px; color:var(--muted) }
 .win-only { margin-left:auto; font-size:12px; color:var(--ink2); display:inline-flex; align-items:center; gap:6px; cursor:pointer }
-.list-filter { margin-left:0 } .list-filter button { padding:2px 9px; font-size:12px }
+.list-filter { margin-bottom:12px } .list-filter button { padding:2px 9px; font-size:12px }
 .toolbar { display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-bottom:16px }
 .toolbar label { font-size:12.5px; color:var(--ink2); display:inline-flex; align-items:center; gap:6px }
 
@@ -226,12 +227,14 @@ td.when { color:var(--muted); white-space:nowrap }
   <div class="grid2">
     <section id="issues">
       <header><h2>Assigned to me</h2><span class="count" id="issueCount">–</span><span class="sub" id="issueSub"></span>
-        <label class="win-only"><input type="checkbox" id="issueWin"> Only selected window</label><div class="segs list-filter" id="issueFilter"><button data-f="all">All</button><button data-f="open">Open</button><button data-f="inflight">In flight</button><button data-f="closed">Closed</button></div></header>
+        <label class="win-only"><input type="checkbox" id="issueWin"> Only selected window</label></header>
+      <div class="segs list-filter" id="issueFilter"><button data-f="all">All</button><button data-f="open">Open</button><button data-f="inflight">In flight</button><button data-f="closed">Closed</button></div>
       <div id="issueList" class="scroll"></div>
     </section>
     <section id="prs">
       <header><h2>My pull requests</h2><span class="count" id="prCount">–</span><span class="sub" id="prSub"></span>
-        <label class="win-only"><input type="checkbox" id="prWin"> Only selected window</label><div class="segs list-filter" id="prFilter"><button data-f="all">All</button><button data-f="open">Open</button><button data-f="merged">Merged</button></div></header>
+        <label class="win-only"><input type="checkbox" id="prWin"> Only selected window</label></header>
+      <div class="segs list-filter" id="prFilter"><button data-f="all">All</button><button data-f="open">Open</button><button data-f="merged">Merged</button></div>
       <div id="prList" class="scroll"></div>
       <details><summary id="rrSummary">Waiting on my review</summary><div id="rrList"></div></details>
     </section>
