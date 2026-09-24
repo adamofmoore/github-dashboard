@@ -146,8 +146,9 @@ table { table-layout:fixed } th:first-child, td:first-child { width:auto } td.nu
 #repoPanel .actions { display:flex; gap:8px; margin-bottom:6px }
 
 /* pickup order */
-:root { --z6:#f0616a; --z5:#eb9245; --z4:#cfae3a; --z3:#4cba85; --z2:#6a9fe0; }
-:root[data-theme="light"] { --z6:#c8262f; --z5:#cf6a12; --z4:#9a7a10; --z3:#1f7d52; --z2:#2c63a8; }
+:root { --zp:#d2a8ff; --z6:#f0616a; --z5:#eb9245; --z4:#cfae3a; --z3:#4cba85; --z2:#6a9fe0; }
+:root[data-theme="light"] { --zp:#8250df; --z6:#c8262f; --z5:#cf6a12; --z4:#9a7a10; --z3:#1f7d52; --z2:#2c63a8; }
+.band.priority ol { border-color:var(--zc); box-shadow:0 0 0 1px var(--zc) inset }
 #pickup .ramp { display:flex; gap:3px; height:6px; border-radius:99px; overflow:hidden; margin:0 0 18px }
 #pickup .ramp i { display:block; border-radius:2px; min-width:3px }
 #pickup .zonebar { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:18px }
@@ -515,23 +516,26 @@ function renderAll() { renderLive(); renderDaily(); }
 
 // ---------- pickup order ----------
 const ZONES = [
+  { z: "P", name: "Flagged high priority", color: "var(--zp)", blurb: "Labelled high priority on GitHub. Sits above everything else until the label comes off." },
   { z: "Z6", name: "Critical", color: "var(--z6)", blurb: "A user hits it, or the whole team is blocked. These come off the pile first." },
   { z: "Z5", name: "Broken instruments", color: "var(--z5)", blurb: "Gates, tests and tools that report the wrong thing. Every hour they stay red costs trust in every other result." },
   { z: "Z4", name: "Correctness debt", color: "var(--z4)", blurb: "Real defects with a bounded blast radius. The bulk of the pile, and where steady progress shows." },
   { z: "Z3", name: "Accessibility", color: "var(--z3)", blurb: "Keyboard, focus and screen-reader work, plus the primitives underneath them." },
   { z: "Z2", name: "Decisions and cleanup", color: "var(--z2)", blurb: "Policy calls, sequencing waits and dead code. Cheap to close, or not yours to decide alone." },
 ];
+const PRIORITY_LABELS = ["high priority", "high-priority", "priority: high", "priority/high", "p0", "p1", "urgent", "blocker"];
 const RULES = [
-  [/\b(crash|data loss|outage|prod(uction)? (down|broken)|blocks? (the )?(team|release)|security|cannot (log ?in|sign ?in)|p0|critical|sev ?1)\b/i, ["critical", "p0", "sev1", "blocker", "urgent", "high priority"], 0],
-  [/\b(flaky|flake|false (green|red|pass|negative)|lane|ci|teamcity|burn-?in|gate|instrument|cannot see|reports? (green|the wrong)|test(s)? (fail|pass)|reds? clean)\b/i, ["flaky", "ci", "test-infra", "infra"], 1],
-  [/\b(a11y|accessib|keyboard|focus|screen ?reader|aria|contrast|tab order)\b/i, ["a11y", "accessibility"], 3],
-  [/\b(decide|decision|policy|should we|cleanup|clean up|dead code|remove|rename|docs?|documentation|follow-?ups?|chore|tidy|deprecat|question)\b/i, ["question", "decision", "cleanup", "chore", "docs", "documentation", "p3", "low priority", "nice to have"], 4],
+  [/\b(crash|data loss|outage|prod(uction)? (down|broken)|blocks? (the )?(team|release)|security|cannot (log ?in|sign ?in)|critical|sev ?1)\b/i, ["critical", "sev1"], 1],
+  [/\b(flaky|flake|false (green|red|pass|negative)|lane|ci|teamcity|burn-?in|gate|instrument|cannot see|reports? (green|the wrong)|test(s)? (fail|pass)|reds? clean)\b/i, ["flaky", "ci", "test-infra", "infra"], 2],
+  [/\b(a11y|accessib|keyboard|focus|screen ?reader|aria|contrast|tab order)\b/i, ["a11y", "accessibility"], 4],
+  [/\b(decide|decision|policy|should we|cleanup|clean up|dead code|remove|rename|docs?|documentation|follow-?ups?|chore|tidy|deprecat|question)\b/i, ["question", "decision", "cleanup", "chore", "docs", "documentation", "p3", "low priority", "nice to have"], 5],
 ];
 function zoneFor(i) {
   const labels = i.labels.map((l) => l.name.toLowerCase());
+  if (labels.some((l) => PRIORITY_LABELS.includes(l))) return 0;
   const text = `${i.title} ${i.why || ""}`;
-  for (const [re, labs, z] of RULES) if (labs.some((l) => labels.includes(l)) || re.test(i.title) || (z !== 4 && re.test(text))) return z;
-  return 2;
+  for (const [re, labs, z] of RULES) if (labs.some((l) => labels.includes(l)) || re.test(i.title) || (z !== 5 && re.test(text))) return z;
+  return 3;
 }
 function ageDays(iso) { return Math.max(0, Math.round((Date.now() - new Date(iso)) / 86400000)); }
 let zoneFilter = store.get("zoneFilter", null);
@@ -541,13 +545,14 @@ function renderPickup() {
   const inZone = ZONES.map((_, z) => issues.filter((i) => i.zone === z).sort((a, b) => (b.linkedPrs.length - a.linkedPrs.length) || (b.comments - a.comments) || a.created_at.localeCompare(b.created_at)));
   $("#pickupCount").textContent = issues.length;
   $("#ramp").innerHTML = ZONES.map((zn, z) => `<i style="flex:${inZone[z].length || 0}; background:${zn.color}" title="${zn.z} ${zn.name}: ${inZone[z].length}"></i>`).join("");
-  $("#zonebar").innerHTML = ZONES.map((zn, z) => `<button data-z="${z}" aria-pressed="${zoneFilter === z}" style="--zc:${zn.color}"><i></i>${zn.z} · ${zn.name} <b>${inZone[z].length}</b></button>`).join("");
+  $("#zonebar").innerHTML = ZONES.map((zn, z) => (z === 0 && !inZone[0].length) ? "" : `<button data-z="${z}" aria-pressed="${zoneFilter === z}" style="--zc:${zn.color}"><i></i>${z === 0 ? "" : zn.z + " · "}${zn.name} <b>${inZone[z].length}</b></button>`).join("");
   document.querySelectorAll("#zonebar button").forEach((b) => b.onclick = () => { zoneFilter = zoneFilter === Number(b.dataset.z) ? null : Number(b.dataset.z); store.set("zoneFilter", zoneFilter); renderPickup(); });
   let rank = 0;
   $("#bands").innerHTML = ZONES.map((zn, z) => {
     const rows = inZone[z]; const start = rank; rank += rows.length;
     if (zoneFilter !== null && zoneFilter !== z) return "";
-    return `<section class="band" style="--zc:${zn.color}"><header class="band-head"><span class="zone">${zn.z}</span><h3>${zn.name}</h3><span class="band-count"><b>${rows.length}</b> ${rows.length === 1 ? "issue" : "issues"}</span><p class="band-blurb">${zn.blurb}</p></header><ol>` +
+    if (z === 0 && rows.length === 0 && zoneFilter === null) return "";
+    return `<section class="band${z === 0 ? " priority" : ""}" style="--zc:${zn.color}"><header class="band-head"><span class="zone">${z === 0 ? "!" : zn.z}</span><h3>${zn.name}</h3><span class="band-count"><b>${rows.length}</b> ${rows.length === 1 ? "issue" : "issues"}</span><p class="band-blurb">${zn.blurb}</p></header><ol>` +
       rows.map((i, k) => `<li><span class="stripe"></span><span class="rank">${start + k + 1}</span><div class="cell"><a class="title" href="${i.url}" target="_blank">${esc(i.title)}</a>${i.why ? `<p class="why">${esc(i.why)}</p>` : ""}<div class="meta"><span class="pill repo">${esc(i.repo.split("/")[1])}<b>#${i.number}</b></span>${i.linkedPrs.map((p) => `<a class="pill flight" href="${p.url}" target="_blank">PR #${p.number}${p.draft ? " draft" : ""}</a>`).join("")}${i.labels.map((l) => `<span class="pill">${esc(l.name)}</span>`).join("")}<span class="pill">${ageDays(i.created_at)}d open</span>${i.comments ? `<span class="pill">${i.comments} comment${i.comments === 1 ? "" : "s"}</span>` : ""}</div></div></li>`).join("") + `</ol></section>`;
   }).join("");
 }
