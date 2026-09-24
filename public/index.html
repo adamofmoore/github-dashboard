@@ -61,25 +61,11 @@ button.primary { background:#238636; border-color:rgba(240,246,252,.1) } button.
 input[type=date] { padding:4px 8px }
 .dot { display:inline-block; width:8px; height:8px; border-radius:2px; margin-right:6px; vertical-align:1px }
 
-.hero { padding:20px 0 26px; display:grid; grid-template-columns:200px 1fr; gap:36px; align-items:start }
-@media (max-width:900px) { .hero { grid-template-columns:1fr; gap:20px } }
-.hero .lead { font-size:13px; color:var(--muted) }
-.hero .lead strong { display:block; font-size:30px; font-weight:800; letter-spacing:-.03em; margin-bottom:2px;
-  background:linear-gradient(90deg, var(--g1), var(--g2) 55%, var(--g3)); -webkit-background-clip:text; background-clip:text; color:transparent }
-.hero .stats { display:grid; grid-template-columns:repeat(5, minmax(0,1fr)); gap:12px }
-@media (max-width:1100px) { .hero .stats { grid-template-columns:repeat(3, 1fr) } }
-@media (max-width:600px) { .hero .stats { grid-template-columns:repeat(2, 1fr) } }
-.stat { background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:16px 18px; position:relative; overflow:hidden }
-.stat::after { content:""; position:absolute; left:0; right:0; top:0; height:3px; background:linear-gradient(90deg, var(--c), transparent 85%) }
-.stat .big { font-size:44px; font-weight:800; letter-spacing:-.04em; line-height:1; color:var(--ink) }
-.stat .name { font-size:13px; color:var(--ink2); margin-top:8px; font-weight:500 }
-.stat .delta { font-size:12px; color:var(--muted); margin-top:2px } .stat .delta.up { color:var(--good) } .stat .delta.down { color:var(--bad) }
-
-section { padding:20px 0 8px; margin-top:8px }
+section { padding:22px 0 8px; margin-top:8px }
 section > header { display:flex; align-items:baseline; gap:12px; margin-bottom:14px; flex-wrap:wrap }
 .grid2 section > header { flex-wrap:nowrap; min-height:24px } .grid2 section > header .sub { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0 } .grid2 .win-only { flex:none }
-section > header h2 { margin:0; font-size:15px; font-weight:600 }
-section > header .count { font-size:15px; font-weight:700; color:var(--ink) }
+section > header h2 { margin:0; font-size:22px; font-weight:800; letter-spacing:-.03em; line-height:1.1; background:linear-gradient(90deg, var(--g1), var(--g2) 55%, var(--g3)); -webkit-background-clip:text; background-clip:text; color:transparent }
+section > header .count { font-size:20px; font-weight:800; color:var(--ink); letter-spacing:-.02em }
 section > header .sub { font-size:12.5px; color:var(--muted) }
 .win-only { margin-left:auto; font-size:12px; color:var(--ink2); display:inline-flex; align-items:center; gap:6px; cursor:pointer }
 .list-filter { margin-bottom:12px; display:flex; width:100% } .list-filter button { flex:1; text-align:center; padding:6px 12px }
@@ -154,8 +140,7 @@ td.when { color:var(--muted); white-space:nowrap }
 .sk::after { content:""; position:absolute; inset:0; background:linear-gradient(90deg, transparent, var(--shimmer), transparent); animation:shimmer 1.3s infinite }
 @keyframes shimmer { from { transform:translateX(-100%) } to { transform:translateX(100%) } }
 .sk-row { height:38px; margin:8px 12px; border-radius:6px }
-.loading .tile b, .loading .stat .big, .loading .stat .delta, .loading .hdrcounts b { composes:sk }
-.busy .n b, .busy .stat .big, .busy .stat .delta, .busy #legend { color:transparent; background:var(--chip); border-radius:4px; animation:pulse 1.2s ease-in-out infinite }
+.busy .n b, .busy #legend { color:transparent; background:var(--chip); border-radius:4px; animation:pulse 1.2s ease-in-out infinite }
 .busy .n b .dot, .busy #legend .dot { visibility:hidden }
 .busy #chart { opacity:.35 }
 @keyframes pulse { 50% { opacity:.55 } }
@@ -198,11 +183,6 @@ td.when { color:var(--muted); white-space:nowrap }
     <div class="segs" id="theme"><button data-t="dark" aria-pressed="true">Dark</button><button data-t="light">Light</button></div>
     <button id="refresh">Refresh</button>
     <button id="signout" style="display:none">Sign out</button>
-  </div>
-
-  <div class="hero">
-    <div class="lead"><strong>Today</strong><span id="heroLead">since midnight, local time</span></div>
-    <div class="stats" id="hero"></div>
   </div>
 
   <section>
@@ -271,7 +251,6 @@ let knownRepos = new Set(store.get("knownRepos", []));
 let localRepos = new Map();
 const skRows = (n) => Array.from({ length: n }, () => `<div class="sk sk-row"></div>`).join("");
 function skeletons() {
-  $("#hero").innerHTML = SERIES.map(([, name, col]) => `<div class="stat" style="--c:${col}"><div class="big sk" style="width:70px">0</div><div class="name">${name}</div><div class="delta sk" style="width:120px">&nbsp;</div></div>`).join("");
   $("#tiles").innerHTML = ["Today","Yesterday","Last 7 days","Last 30 days","Selected"].map((l) => `<div class="tile"><div class="label">${l}</div><div class="nums">${SERIES.map(([, , , short]) => `<div class="n"><b class="sk">00</b><span>${short}</span></div>`).join("")}</div></div>`).join("");
   $("#legend").innerHTML = SERIES.map(([, n, c]) => `<span><span class="dot" style="background:${c}"></span>${n}</span>`).join("");
   $("#issueList").innerHTML = skRows(6);
@@ -410,19 +389,9 @@ function windowFor(id) {
   const t = today(); const r = currentRange();
   return { today:[t,t], yesterday:[shift(t,-1),shift(t,-1)], "7d":[shift(t,-6),t], "30d":[shift(t,-29),t], range:[r.from,r.to] }[id];
 }
-function renderHero() {
-  const t = today(), y = shift(t, -1);
-  $("#hero").innerHTML = SERIES.map(([m, name, col]) => {
-    const now = countIn(m, t, t), prev = countIn(m, y, y), d = now - prev;
-    const cls = d > 0 ? "up" : d < 0 ? "down" : "";
-    const isBad = m === "prsClosed";
-    return `<div class="stat"><div class="big" style="--c:${col}">${now}</div><div class="name">${name}</div><div class="delta ${isBad ? "" : cls}">${d === 0 ? "same as yesterday" : `${d > 0 ? "+" : "−"}${Math.abs(d)} vs yesterday (${prev})`}</div></div>`;
-  }).join("");
-}
 function renderDaily() {
   if (!daily) return;
   const r = currentRange();
-  renderHero();
   const windows = [["today","Today"],["yesterday","Yesterday"],["7d","Last 7 days"],["30d","Last 30 days"],["range",`Selected, ${fmtRange(r.from, r.to)}`]];
   $("#tiles").innerHTML = windows.map(([id, label]) => { const [from, to] = windowFor(id); const nDays = daysBetween(from, to).length;
     return `<button class="tile" data-tile="${id}" aria-pressed="${activeTile === id}">
