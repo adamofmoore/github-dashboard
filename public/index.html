@@ -97,7 +97,9 @@ section > header .sub { font-size:12.5px; color:var(--muted) }
 
 .chart-wrap { position:relative; background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:14px 14px 8px }
 svg text { fill:var(--muted); font-size:11px }
-.legend { display:flex; gap:16px; flex-wrap:wrap; font-size:12.5px; color:var(--ink2); margin:0 0 8px }
+.chart-head { display:flex; align-items:center; gap:16px; margin-bottom:8px }
+.chart-head .segs { margin-left:auto } .chart-head .segs button { padding:2px 9px; font-size:12px }
+.legend { display:flex; gap:16px; flex-wrap:wrap; font-size:12.5px; color:var(--ink2) }
 .tip { position:absolute; pointer-events:none; background:var(--raise); border:1px solid var(--border); border-radius:6px; padding:8px 11px; font-size:12.5px; box-shadow:0 8px 24px var(--shadow); display:none; z-index:3; white-space:nowrap }
 .tip b { display:block; margin-bottom:4px; font-weight:600 } .tip div { display:flex; justify-content:space-between; gap:16px } .tip div b { display:inline; margin:0 }
 details summary { cursor:pointer; color:var(--muted); font-size:12.5px; margin-top:8px }
@@ -213,7 +215,7 @@ td.when { color:var(--muted); white-space:nowrap }
       <button id="apply" class="primary">Apply range</button>
     </div>
     <div class="tiles" id="tiles"></div>
-    <div class="chart-wrap" id="chartWrap"><div class="legend" id="legend"></div><svg id="chart" height="280" style="width:100%;display:block"></svg><div class="tip" id="tip"></div></div>
+    <div class="chart-wrap" id="chartWrap"><div class="chart-head"><div class="legend" id="legend"></div><div class="segs" id="chartSize"><button data-h="150">Compact</button><button data-h="280">Regular</button></div></div><svg id="chart" height="280" style="width:100%;display:block"></svg><div class="tip" id="tip"></div></div>
     <details><summary>Show as table</summary><div id="chartTable"></div></details>
   </section>
 
@@ -278,6 +280,10 @@ let preset = store.get("preset", "7d");
 let customRange = store.get("customRange", { from: shift(today(), -6), to: today() });
 let activeTile = store.get("activeTile", "range");
 let metricTab = store.get("metricTab", "prsMerged");
+let chartH = store.get("chartH", 280);
+function renderChartSize() { document.querySelectorAll("#chartSize button").forEach((b) => b.setAttribute("aria-pressed", Number(b.dataset.h) === chartH)); $("#chart").setAttribute("height", chartH); }
+document.querySelectorAll("#chartSize button").forEach((b) => b.onclick = () => { chartH = Number(b.dataset.h); store.set("chartH", chartH); renderChartSize(); if (daily) drawChart(currentRange().from, currentRange().to); });
+renderChartSize();
 
 const visible = (repo) => !excluded.has(repo);
 function noteRepos(list) { let changed = false; const lower = new Map([...knownRepos].map((r) => [r.toLowerCase(), r])); for (const r of list) if (!lower.has(r.toLowerCase())) { knownRepos.add(r); lower.set(r.toLowerCase(), r); changed = true; } if (changed) { store.set("knownRepos", [...knownRepos].sort()); renderRepoMenu(); } }
@@ -406,7 +412,7 @@ function drawChart(from, to) {
   const days = []; for (let d = from; d <= to; d = shift(d, 1)) days.push(d);
   const data = days.map((d) => ({ day: d, vals: SERIES.map(([m]) => (daily.metrics[m][d] || []).filter((i) => visible(i.repo)).length) }));
   const max = Math.max(1, ...data.flatMap((r) => r.vals));
-  const svg = $("#chart"); const W = svg.clientWidth || 1000, H = 280, padL = 34, padR = 10, padT = 14, padB = 26;
+  const svg = $("#chart"); const W = svg.clientWidth || 1000, H = chartH, padL = 34, padR = 10, padT = 14, padB = 24;
   const iw = W - padL - padR, ih = H - padT - padB;
   const group = iw / days.length; const gap = Math.max(2, group * 0.22); const bw = Math.max(1, (group - gap) / SERIES.length - 2);
   const y = (v) => padT + ih - (v / max) * ih;
@@ -420,7 +426,7 @@ function drawChart(from, to) {
     out += `<rect class="hit" data-i="${i}" x="${padL + i*group}" y="${padT}" width="${group}" height="${ih}" fill="transparent"/>`;
     row.vals.forEach((v, s) => { if (!v) return; const x = gx + s * (bw + 2); const h = y(0) - y(v);
       out += `<rect x="${x}" y="${y(v)}" width="${bw}" height="${h}" rx="${Math.min(3, bw/2)}" fill="${SERIES[s][2]}" style="pointer-events:none"/>`;
-      if (days.length <= 14 && bw > 14) out += `<text x="${x+bw/2}" y="${y(v)-4}" text-anchor="middle" style="fill:var(--ink2)">${v}</text>`; });
+      if (days.length <= 14 && bw > 14 && H >= 200) out += `<text x="${x+bw/2}" y="${y(v)-4}" text-anchor="middle" style="fill:var(--ink2)">${v}</text>`; });
   });
   svg.setAttribute("viewBox", `0 0 ${W} ${H}`); svg.innerHTML = out;
   $("#legend").innerHTML = SERIES.map(([, n, c]) => `<span><span class="dot" style="background:${c}"></span>${n}</span>`).join("");
