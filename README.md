@@ -1,6 +1,8 @@
 # github-dashboard
 
-Local dashboard of GitHub activity. Not pushed anywhere.
+Local dashboard of your own GitHub activity: assigned issues, open PRs, and per-day opened/closed/merged counts.
+
+Nothing personal is committed: tokens, sessions, and cached activity live in the gitignored `cache/` folder. Anyone who clones this sees their own account (via `gh auth token` on their machine) or signs in with theirs.
 
 ## Run
 
@@ -26,6 +28,14 @@ Only the owner session (localhost with `gh`) sees the "Cloned on this Mac" repo 
 - Issues opened: created by me that day. Issues closed: assigned to me, closed that day.
 - PRs opened / merged: authored by me. PRs closed = closed without merge.
 - Days are local midnight to midnight (server timezone).
+
+## Configuration (`.env` next to `start.sh`, all optional)
+
+- `HOST=0.0.0.0` to accept sign-ins from the network (default `127.0.0.1`).
+- `PORT=4747`.
+- `GITHUB_CLIENT_ID` for one-click device-flow sign-in.
+- `REPO_ROOTS=~,~/Studio` comma-separated folders scanned for local clones (depth 6).
+- `REPO_SKIP=Dropbox (Personal),TrainerRoad Dropbox` extra folder names to skip while scanning.
 
 ## Data and settings
 

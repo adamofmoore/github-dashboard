@@ -220,8 +220,8 @@ async function liveData(c) {
 }
 
 // ---------- local repos (owner only) ----------
-const SCAN_ROOTS = [process.env.HOME, path.join(process.env.HOME, "Studio")];
-const SKIP = new Set(["node_modules", "Library", ".worktrees", "worktrees", ".git", "Dropbox (Personal)", "TrainerRoad Dropbox", "Downloads", "Applications", "Movies", "Music", "Pictures"]);
+const SCAN_ROOTS = (process.env.REPO_ROOTS || "~,~/Studio").split(",").map((r) => r.trim().replace(/^~/, process.env.HOME)).filter(Boolean);
+const SKIP = new Set(["node_modules", "Library", ".worktrees", "worktrees", ".git", "Downloads", "Applications", "Movies", "Music", "Pictures", ...(process.env.REPO_SKIP || "Dropbox (Personal),TrainerRoad Dropbox").split(",").map((x) => x.trim()).filter(Boolean)]);
 function remoteRepo(dir) {
   try {
     const m = fs.readFileSync(path.join(dir, ".git", "config"), "utf8").match(/\[remote "origin"\][^[]*?url\s*=\s*(\S+)/);
