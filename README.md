@@ -1,6 +1,6 @@
 # github-dashboard
 
-Local dashboard of your own GitHub activity: assigned issues, open PRs, and per-day opened/closed/merged counts.
+Local dashboard of your own GitHub activity: assigned issues, open PRs, and per-day opened/merged counts.
 
 ![Dashboard with sample data](docs/screenshot.png)
 
@@ -32,7 +32,7 @@ Only the owner session (localhost with `gh`) sees the "Cloned on this Mac" repo 
 - Assigned issues: `assignee:me is:issue is:open`. In-flight = has an open linked PR.
 - My open PRs: `author:me is:pr is:open`. In review = not draft.
 - Issues opened: created by me that day. Issues closed: assigned to me, closed that day.
-- PRs opened / merged: authored by me. PRs closed = closed without merge.
+- PRs opened / merged: authored by me.
 - Days are local midnight to midnight (server timezone).
 
 ## Configuration (`.env` next to `start.sh`, all optional)

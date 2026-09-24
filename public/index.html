@@ -11,7 +11,7 @@
   color-scheme:dark;
   --page:#0d1117; --surface:#161b22; --raise:#1c2129; --ink:#f0f6fc; --ink2:#c9d1d9; --muted:#8b949e;
   --rule:#30363d; --grid:#21262d; --border:#30363d; --accent:#58a6ff; --accent-ink:#79c0ff;
-  --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#d55181;
+  --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500;
   --good:#3fb950; --warn:#d29922; --bad:#f85149; --chip:#21262d; --focus:#58a6ff;
   --g1:#7ee787; --g2:#58a6ff; --g3:#d2a8ff; --g4:#ffa657; --g5:#ff7b72;
   --glow1:rgba(88,166,255,.22); --glow2:rgba(210,168,255,.18); --glow3:rgba(126,231,135,.10);
@@ -21,7 +21,7 @@
   color-scheme:light;
   --page:#ffffff; --surface:#f6f8fa; --raise:#ffffff; --ink:#1f2328; --ink2:#424a53; --muted:#656d76;
   --rule:#d0d7de; --grid:#e6e9ed; --border:#d0d7de; --accent:#0969da; --accent-ink:#0550ae;
-  --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --s4:#eda100; --s5:#e87ba4;
+  --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --s4:#eda100;
   --good:#1a7f37; --warn:#9a6700; --bad:#cf222e; --chip:#f6f8fa; --focus:#0969da;
   --g1:#1a7f37; --g2:#0969da; --g3:#8250df; --g4:#bc4c00; --g5:#cf222e;
   --glow1:rgba(9,105,218,.14); --glow2:rgba(130,80,223,.12); --glow3:rgba(26,127,55,.08);
@@ -228,7 +228,6 @@ const $ = (s) => document.querySelector(s);
 const SERIES = [
   ["prsMerged", "PRs merged", "var(--s1)", "merged"],
   ["prsOpened", "PRs opened", "var(--s2)", "opened"],
-  ["prsClosed", "PRs closed unmerged", "var(--s5)", "closed"],
   ["issuesOpened", "Issues opened", "var(--s3)", "issues opened"],
   ["issuesClosed", "Issues closed", "var(--s4)", "issues closed"],
 ];
