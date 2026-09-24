@@ -80,6 +80,7 @@ section > header { display:flex; align-items:baseline; gap:12px; margin-bottom:1
 section > header h2 { margin:0; font-size:15px; font-weight:600 }
 section > header .count { font-size:15px; font-weight:700; color:var(--ink) }
 section > header .sub { font-size:12.5px; color:var(--muted) }
+.list-filter { margin-left:auto } .list-filter button { padding:2px 9px; font-size:12px }
 .toolbar { display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-bottom:16px }
 .toolbar label { font-size:12.5px; color:var(--ink2); display:inline-flex; align-items:center; gap:6px }
 
@@ -227,11 +228,13 @@ td.when { color:var(--muted); white-space:nowrap }
 
   <div class="grid2">
     <section id="issues">
-      <header><h2>Assigned to me</h2><span class="count" id="issueCount">–</span><span class="sub" id="issueSub"></span></header>
+      <header><h2>Assigned to me</h2><span class="count" id="issueCount">–</span><span class="sub" id="issueSub"></span>
+        <div class="segs list-filter" id="issueFilter"><button data-f="all">All</button><button data-f="open">Open</button><button data-f="inflight">In flight</button><button data-f="closed">Closed</button></div></header>
       <div id="issueList" class="scroll"></div>
     </section>
     <section id="prs">
-      <header><h2>My open pull requests</h2><span class="count" id="prCount">–</span><span class="sub" id="prSub"></span></header>
+      <header><h2>My pull requests</h2><span class="count" id="prCount">–</span><span class="sub" id="prSub"></span>
+        <div class="segs list-filter" id="prFilter"><button data-f="all">All</button><button data-f="open">Open</button><button data-f="merged">Merged</button></div></header>
       <div id="prList" class="scroll"></div>
       <details><summary id="rrSummary">Waiting on my review</summary><div id="rrList"></div></details>
     </section>
@@ -280,6 +283,8 @@ let preset = store.get("preset", "7d");
 let customRange = store.get("customRange", { from: shift(today(), -6), to: today() });
 let activeTile = store.get("activeTile", "range");
 let metricTab = store.get("metricTab", "prsMerged");
+let listFilter = store.get("listFilter", { issues: "all", prs: "all" });
+const HIST_DAYS = 30;
 let chartH = store.get("chartH", 280);
 function renderChartSize() { document.querySelectorAll("#chartSize button").forEach((b) => b.setAttribute("aria-pressed", Number(b.dataset.h) === chartH)); $("#chart").setAttribute("height", chartH); }
 document.querySelectorAll("#chartSize button").forEach((b) => b.onclick = () => { chartH = Number(b.dataset.h); store.set("chartH", chartH); renderChartSize(); if (daily) drawChart(currentRange().from, currentRange().to); });
@@ -331,7 +336,7 @@ async function loadDaily(force) {
   setStatus("Loading activity", false, true);
   try { daily = await api(`/api/daily?from=${from}&to=${to}${force ? "&force=1" : ""}`);
     const repos = new Set(); for (const m of Object.values(daily.metrics)) for (const l of Object.values(m)) for (const i of l) repos.add(i.repo);
-    noteRepos([...repos]); renderDaily(); setStatus(`Updated ${new Date().toLocaleTimeString([], {hour:"numeric", minute:"2-digit"})}`); }
+    noteRepos([...repos]); renderDaily(); renderLive(); setStatus(`Updated ${new Date().toLocaleTimeString([], {hour:"numeric", minute:"2-digit"})}`); }
   catch (e) { setStatus("Activity failed: " + e.message, true); }
 }
 
@@ -344,35 +349,52 @@ function prPhase(p) {
   if (p.checks === "PENDING") return ["Checks running", "pill flight"];
   return ["In review", "pill flight"];
 }
+const itemKey = (i) => `${i.repo}#${i.number}`;
+function recent(metric) {
+  if (!daily) return [];
+  const t = today(), from = shift(t, -(HIST_DAYS - 1)), m = new Map();
+  for (const i of itemsIn(metric, from, t)) if (!m.has(itemKey(i))) m.set(itemKey(i), i);
+  return [...m.values()];
+}
 function renderLive() {
   if (!live) return;
-  const issues = live.issues.filter((i) => visible(i.repo)).sort((a,b) => b.updated_at.localeCompare(a.updated_at));
-  const inflight = issues.filter(inflightIssue).length;
-  $("#issueCount").textContent = issues.length;
-  $("#issueSub").textContent = `${inflight} with a PR in flight, ${issues.length - inflight} not started`;
-  $("#issueList").innerHTML = issues.length ? `<table><thead><tr><th>Issue</th><th>Progress</th><th class="num">Updated</th></tr></thead><tbody>` +
+  const openIssues = live.issues.filter((i) => visible(i.repo)).sort((a,b) => b.updated_at.localeCompare(a.updated_at));
+  const inflight = openIssues.filter(inflightIssue);
+  const closedIssues = recent("issuesClosed").filter((i) => i.state === "closed").sort((a,b) => b.closed_at.localeCompare(a.closed_at));
+  const issueSets = { open: openIssues, inflight, closed: closedIssues, all: [...openIssues, ...closedIssues] };
+  $("#issueCount").textContent = openIssues.length;
+  $("#issueSub").textContent = `${inflight.length} in flight, ${openIssues.length - inflight.length} not started, ${closedIssues.length} closed in ${HIST_DAYS}d`;
+  document.querySelectorAll("#issueFilter button").forEach((b) => { b.setAttribute("aria-pressed", b.dataset.f === listFilter.issues); b.textContent = `${{all:"All",open:"Open",inflight:"In flight",closed:"Closed"}[b.dataset.f]} ${issueSets[b.dataset.f].length}`; });
+  const issues = issueSets[listFilter.issues];
+  $("#issueList").innerHTML = issues.length ? `<table><thead><tr><th>Issue</th><th>Progress</th><th class="num">${listFilter.issues === "closed" ? "Closed" : "Updated"}</th></tr></thead><tbody>` +
     issues.map((i) => `<tr><td><div class="item"><span class="repo">${esc(i.repo)} #${i.number}</span><a class="title" href="${i.url}" target="_blank">${esc(i.title)}</a></div></td>
-      <td>${inflightIssue(i) ? i.linkedPrs.map((p) => `<a class="pill flight" href="${p.url}" target="_blank">PR #${p.number}${p.draft ? " draft" : ""}</a>`).join("") : `<span class="pill">Not started</span>`}${i.labels.map((l) => `<span class="pill">${esc(l.name)}</span>`).join("")}</td>
-      <td class="num when">${ago(i.updated_at)}</td></tr>`).join("") + "</tbody></table>" : `<div class="empty">Nothing assigned to you in the selected repos.</div>`;
+      <td>${i.state === "closed" ? `<span class="pill">${i.state_reason === "not_planned" ? "Not planned" : "Closed"}</span>` : inflightIssue(i) ? i.linkedPrs.map((p) => `<a class="pill flight" href="${p.url}" target="_blank">PR #${p.number}${p.draft ? " draft" : ""}</a>`).join("") : `<span class="pill">Not started</span>`}${(i.labels || []).map((l) => `<span class="pill">${esc(l.name)}</span>`).join("")}</td>
+      <td class="num when">${ago(i.closed_at && i.state === "closed" ? i.closed_at : i.updated_at || i.created_at)}</td></tr>`).join("") + "</tbody></table>" : `<div class="empty">Nothing here in the selected repos.</div>`;
 
-  const prs = live.prs.filter((p) => visible(p.repo)).sort((a,b) => b.updated_at.localeCompare(a.updated_at));
-  const drafts = prs.filter((p) => p.draft).length;
-  $("#prCount").textContent = prs.length;
-  $("#prSub").textContent = `${prs.length - drafts} in review, ${drafts} draft`;
-  $("#hdrCounts").innerHTML = `<a href="#issues"><b>${issues.length}</b>issues, ${inflight} in flight</a><a href="#prs"><b>${prs.length}</b>PRs, ${prs.length - drafts} in review</a>`;
+  const openPrs = live.prs.filter((p) => visible(p.repo)).sort((a,b) => b.updated_at.localeCompare(a.updated_at));
+  const drafts = openPrs.filter((p) => p.draft).length;
+  const mergedPrs = recent("prsMerged").filter((p) => p.merged_at).sort((a,b) => b.merged_at.localeCompare(a.merged_at));
+  const prSets = { open: openPrs, merged: mergedPrs, all: [...openPrs, ...mergedPrs] };
+  $("#prCount").textContent = openPrs.length;
+  $("#prSub").textContent = `${openPrs.length - drafts} in review, ${drafts} draft, ${mergedPrs.length} merged in ${HIST_DAYS}d`;
+  document.querySelectorAll("#prFilter button").forEach((b) => { b.setAttribute("aria-pressed", b.dataset.f === listFilter.prs); b.textContent = `${{all:"All",open:"Open",merged:"Merged"}[b.dataset.f]} ${prSets[b.dataset.f].length}`; });
+  $("#hdrCounts").innerHTML = `<a href="#issues"><b>${openIssues.length}</b>issues, ${inflight.length} in flight</a><a href="#prs"><b>${openPrs.length}</b>PRs, ${openPrs.length - drafts} in review</a>`;
   if (!daily) $("#status").textContent = "Loading activity";
-  $("#prList").innerHTML = prs.length ? prTable(prs) : `<div class="empty">No open pull requests in the selected repos.</div>`;
+  const prs = prSets[listFilter.prs];
+  $("#prList").innerHTML = prs.length ? prTable(prs) : `<div class="empty">No pull requests here in the selected repos.</div>`;
   const rr = live.reviewRequests.filter((p) => visible(p.repo));
   $("#rrSummary").textContent = `Waiting on my review (${rr.length})`;
   $("#rrList").innerHTML = rr.length ? prTable(rr) : `<div class="empty">No review requests.</div>`;
 }
 function prTable(prs) {
   return `<table><thead><tr><th>Pull request</th><th>Status</th><th class="num">Lines</th><th class="num">Updated</th></tr></thead><tbody>` +
-    prs.map((p) => { const [t, c] = prPhase(p); return `<tr><td><div class="item"><span class="repo">${esc(p.repo)} #${p.number} — ${esc(p.head)}</span><a class="title" href="${p.url}" target="_blank">${esc(p.title)}</a></div></td>
+    prs.map((p) => {
+      if (p.merged_at) return `<tr><td><div class="item"><span class="repo">${esc(p.repo)} #${p.number}</span><a class="title" href="${p.url}" target="_blank">${esc(p.title)}</a></div></td><td><span class="pill good">Merged</span></td><td class="num when"></td><td class="num when">${ago(p.merged_at)}</td></tr>`;
+      const [t, c] = prPhase(p);
+      return `<tr><td><div class="item"><span class="repo">${esc(p.repo)} #${p.number} — ${esc(p.head)}</span><a class="title" href="${p.url}" target="_blank">${esc(p.title)}</a></div></td>
       <td><span class="${c}">${t}</span>${p.mergeable === "CONFLICTING" ? `<span class="pill bad">Conflicts</span>` : ""}${p.closes.map((i) => `<a class="pill" href="${i.url}" target="_blank">Closes #${i.number}</a>`).join("")}${p.reviewers.map((r) => `<span class="pill">${esc(r)}</span>`).join("")}</td>
       <td class="num when">+${p.additions} −${p.deletions}</td><td class="num when">${ago(p.updated_at)}</td></tr>`; }).join("") + "</tbody></table>";
 }
-
 function countIn(metric, from, to) {
   let n = 0; for (const d in daily.metrics[metric]) if (d >= from && d <= to) n += daily.metrics[metric][d].filter((i) => visible(i.repo)).length; return n;
 }
@@ -454,6 +476,7 @@ function renderRangeItems() {
 
 document.querySelectorAll("#presets button").forEach((b) => b.onclick = () => { preset = b.dataset.p; store.set("preset", preset); activeTile = preset === "custom" ? "range" : preset; store.set("activeTile", activeTile); loadDaily(); });
 $("#apply").onclick = () => { const f = $("#from").value, t = $("#to").value; if (!f || !t) return; customRange = f <= t ? { from: f, to: t } : { from: t, to: f }; store.set("customRange", customRange); preset = "custom"; store.set("preset", preset); activeTile = "range"; store.set("activeTile", activeTile); loadDaily(); };
+document.querySelectorAll("#issueFilter button, #prFilter button").forEach((b) => b.onclick = () => { listFilter[b.closest("#issueFilter") ? "issues" : "prs"] = b.dataset.f; store.set("listFilter", listFilter); renderLive(); });
 $("#refresh").onclick = () => { loadLive(); loadDaily(true); };
 window.addEventListener("resize", () => daily && drawChart(currentRange().from, currentRange().to));
 function renderAll() { renderLive(); renderDaily(); }
