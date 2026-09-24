@@ -130,7 +130,6 @@ const METRICS = {
   issuesOpened: { q: (u) => `author:${u} is:issue`, field: "created", ts: (i) => i.created_at },
   issuesClosed: { q: (u) => `assignee:${u} is:issue`, field: "closed", ts: (i) => i.closed_at },
   prsOpened: { q: (u) => `author:${u} is:pr`, field: "created", ts: (i) => i.created_at },
-  prsClosed: { q: (u) => `author:${u} is:pr is:unmerged`, field: "closed", ts: (i) => i.closed_at },
   prsMerged: { q: (u) => `author:${u} is:pr`, field: "merged", ts: (i) => i.pull_request?.merged_at },
 };
 function slim(i) {

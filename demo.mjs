@@ -11,7 +11,7 @@ const pad = (x) => String(x).padStart(2, "0");
 const iso = (dayKey, h) => `${dayKey}T${pad(h)}:${pad(Math.floor(rnd() * 60))}:00Z`;
 
 export function demoDaily(days, todayKey) {
-  const metrics = { issuesOpened: {}, issuesClosed: {}, prsOpened: {}, prsClosed: {}, prsMerged: {} };
+  const metrics = { issuesOpened: {}, issuesClosed: {}, prsOpened: {}, prsMerged: {} };
   for (const d of days) {
     const dow = new Date(d + "T12:00:00").getDay();
     const weekend = dow === 0 || dow === 6;
@@ -23,7 +23,6 @@ export function demoDaily(days, todayKey) {
     });
     metrics.prsMerged[d] = make(12, "merged");
     metrics.prsOpened[d] = make(14, "open");
-    metrics.prsClosed[d] = make(1, "closed");
     metrics.issuesOpened[d] = make(6, "issueOpen");
     metrics.issuesClosed[d] = make(9, "issueClose");
   }
