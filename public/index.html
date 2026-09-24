@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GitHub Dashboard</title>
+<style>
+:root {
+  --page:#f9f9f7; --surface:#fcfcfb; --ink:#0b0b0b; --ink2:#52514e; --muted:#898781;
+  --grid:#e1e0d9; --axis:#c3c2b7; --border:rgba(11,11,11,.10); --accent:#2a78d6;
+  --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --s4:#eda100; --s5:#e87ba4;
+  --good:#006300; --warn:#b07500; --bad:#d03b3b; --chip:#eeede8;
+}
+@media (prefers-color-scheme: dark) { :root {
+  --page:#0d0d0d; --surface:#1a1a19; --ink:#fff; --ink2:#c3c2b7; --muted:#898781;
+  --grid:#2c2c2a; --axis:#383835; --border:rgba(255,255,255,.10); --accent:#3987e5;
+  --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#d55181;
+  --good:#0ca30c; --warn:#fab219; --bad:#e66767; --chip:#262624;
+}}
+* { box-sizing:border-box }
+body { margin:0; background:var(--page); color:var(--ink); font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,sans-serif; font-variant-numeric:tabular-nums }
+a { color:var(--accent); text-decoration:none } #hdrCounts a { color:var(--ink2) } #hdrCounts b { color:var(--ink); font-size:16px } a:hover { text-decoration:underline }
+header { display:flex; align-items:center; gap:16px; padding:14px 24px; border-bottom:1px solid var(--border); background:var(--surface); position:sticky; top:0; z-index:5; flex-wrap:wrap }
+header h1 { font-size:16px; margin:0; font-weight:600 }
+header .spacer { flex:1 }
+.muted { color:var(--muted) } .ink2 { color:var(--ink2) }
+button, select, input[type=date] { font:inherit; color:var(--ink); background:var(--surface); border:1px solid var(--border); border-radius:6px; padding:5px 10px; cursor:pointer }
+button.primary { background:var(--accent); color:#fff; border-color:transparent }
+button.seg { border-radius:0; margin-left:-1px } .segs { display:inline-flex } .segs button:first-child { border-radius:6px 0 0 6px } .segs button:last-child { border-radius:0 6px 6px 0 }
+button[aria-pressed=true] { background:var(--chip); font-weight:600; box-shadow:inset 0 0 0 1px var(--accent) }
+main { padding:20px 24px; max-width:1500px; margin:0 auto; display:grid; gap:20px; min-width:0 } section.card { min-width:0; overflow:hidden }
+section.card { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:16px 18px }
+h2 { font-size:13px; text-transform:uppercase; letter-spacing:.06em; color:var(--ink2); margin:0 0 12px; font-weight:600; display:flex; align-items:center; gap:10px }
+h2 .count { font-size:22px; color:var(--ink); letter-spacing:0; text-transform:none }
+.grid2 { display:grid; grid-template-columns:1fr 1fr; gap:20px } @media (max-width:1000px){ .grid2 { grid-template-columns:1fr } }
+.tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:12px }
+.tile { border:1px solid var(--border); border-radius:8px; padding:10px 12px; cursor:pointer; background:transparent }
+.tile[aria-pressed=true] { box-shadow:inset 0 0 0 2px var(--accent) }
+.tile .label { font-size:12px; color:var(--ink2); display:flex; justify-content:space-between }
+.tile .nums { display:flex; gap:10px; margin-top:6px; flex-wrap:wrap }
+.tile .n { display:flex; flex-direction:column; align-items:flex-start; min-width:38px }
+.tile .n b { font-size:20px; font-weight:600; line-height:1.1 }
+.tile .n span { font-size:10.5px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em }
+.dot { display:inline-block; width:9px; height:9px; border-radius:2px; margin-right:5px; vertical-align:0 }
+table { width:100%; border-collapse:collapse } th { text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); font-weight:600; padding:6px 8px; border-bottom:1px solid var(--grid) }
+td { padding:6px 8px; border-bottom:1px solid var(--grid); vertical-align:top } tr:last-child td { border-bottom:0 }
+td.num, th.num { text-align:right }
+.pill { display:inline-block; font-size:11px; padding:1px 7px; border-radius:99px; background:var(--chip); color:var(--ink2); margin-right:4px; white-space:nowrap }
+.pill.good { color:var(--good) } .pill.warn { color:var(--warn) } .pill.bad { color:var(--bad) } .pill.flight { color:var(--accent); font-weight:600 }
+.repo { color:var(--muted); font-size:12px }
+.scroll { max-height:520px; overflow:auto }
+.list-title { display:block; max-width:640px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+.toolbar { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:14px }
+.toolbar label { font-size:12px; color:var(--ink2) }
+#repoMenu { position:relative } #repoPanel { display:none; position:absolute; top:34px; left:0; background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:10px; min-width:320px; max-height:420px; overflow:auto; z-index:10; box-shadow:0 8px 24px rgba(0,0,0,.18) }
+#repoPanel.open { display:block } #repoPanel label { display:flex; gap:8px; padding:3px 4px; font-size:13px; color:var(--ink); cursor:pointer } #repoPanel .actions { display:flex; gap:8px; margin-bottom:8px }
+.chart-wrap { position:relative } svg text { fill:var(--muted); font-size:11px } .legend { display:flex; gap:14px; flex-wrap:wrap; font-size:12px; color:var(--ink2); margin:6px 0 4px }
+.tip { position:absolute; pointer-events:none; background:var(--surface); border:1px solid var(--border); border-radius:6px; padding:6px 9px; font-size:12px; box-shadow:0 4px 14px rgba(0,0,0,.15); display:none; z-index:3; white-space:nowrap }
+.tip b { display:block; margin-bottom:3px }
+.sub { font-size:12px; color:var(--muted) }
+.status { font-size:12px; color:var(--muted) } .status.err { color:var(--bad) }
+details summary { cursor:pointer; color:var(--ink2); font-size:12px; margin-top:8px }
+.empty { color:var(--muted); font-style:italic; padding:8px }
+</style>
+</head>
+<body>
+<header>
+  <h1>GitHub · <span id="who">…</span></h1>
+  <div id="repoMenu">
+    <button id="repoBtn">Repos: all ▾</button>
+    <div id="repoPanel">
+      <div class="actions"><button id="repoAll">All</button><button id="repoNone">None</button></div>
+      <div id="repoList"></div>
+    </div>
+  </div>
+  <span id="hdrCounts" class="ink2"></span>
+  <div class="spacer"></div>
+  <span id="status" class="status"></span>
+  <button id="refresh">Refresh</button>
+</header>
+
+<main>
+  
+  <section class="card">
+    <h2>Activity by day <span class="sub">local midnight → midnight</span></h2>
+    <div class="toolbar">
+      <div class="segs" id="presets">
+        <button class="seg" data-p="today">Today</button>
+        <button class="seg" data-p="yesterday">Yesterday</button>
+        <button class="seg" data-p="7d">7d</button>
+        <button class="seg" data-p="30d">30d</button>
+        <button class="seg" data-p="custom">Custom</button>
+      </div>
+      <label>From <input type="date" id="from"></label>
+      <label>To <input type="date" id="to"></label>
+      <button id="apply">Apply</button>
+      <span class="sub" id="rangeLabel"></span>
+    </div>
+    <div class="tiles" id="tiles"></div>
+    <div class="chart-wrap" id="chartWrap" style="margin-top:16px"><div class="legend" id="legend"></div><svg id="chart" height="260" style="width:100%;display:block"></svg><div class="tip" id="tip"></div></div>
+    <details><summary>Table view</summary><div id="chartTable"></div></details>
+  </section>
+
+  <section class="card">
+    <h2>Items in range <span class="sub" id="itemsSub"></span></h2>
+    <div class="segs" id="metricTabs" style="margin-bottom:10px"></div>
+    <div id="rangeItems" class="scroll"></div>
+  </section>
+<div class="grid2">
+    <section class="card" id="issues">
+      <h2>Assigned issues <span class="count" id="issueCount">–</span> <span class="sub" id="issueSub"></span></h2>
+      <div id="issueList" class="scroll"></div>
+    </section>
+    <section class="card" id="prs">
+      <h2>My open PRs <span class="count" id="prCount">–</span> <span class="sub" id="prSub"></span></h2>
+      <div id="prList" class="scroll"></div>
+      <details><summary id="rrSummary">Review requested of me</summary><div id="rrList"></div></details>
+    </section>
+  </div>
+</main>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const SERIES = [
+  ["prsMerged", "PRs merged", "var(--s1)"],
+  ["prsOpened", "PRs opened", "var(--s2)"],
+  ["prsClosed", "PRs closed (unmerged)", "var(--s5)"],
+  ["issuesOpened", "Issues opened", "var(--s3)"],
+  ["issuesClosed", "Issues closed", "var(--s4)"],
+];
+const pad = (n) => String(n).padStart(2, "0");
+const dayKey = (d) => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+const shift = (key, n) => { const [y,m,d] = key.split("-").map(Number); return dayKey(new Date(y, m-1, d+n)); };
+const today = () => dayKey(new Date());
+const fmtDay = (k) => { const [y,m,d] = k.split("-").map(Number); return new Date(y,m-1,d).toLocaleDateString(undefined,{month:"short",day:"numeric"}); };
+const ago = (iso) => { const s = (Date.now()-new Date(iso))/1000; if (s<3600) return `${Math.round(s/60)}m`; if (s<86400) return `${Math.round(s/3600)}h`; return `${Math.round(s/86400)}d`; };
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+// ---------- persisted settings ----------
+const store = {
+  get: (k, d) => { try { const v = JSON.parse(localStorage.getItem("ghdash:"+k)); return v ?? d; } catch { return d; } },
+  set: (k, v) => localStorage.setItem("ghdash:"+k, JSON.stringify(v)),
+};
+let knownRepos = new Set(store.get("knownRepos", []));
+let excluded = new Set(store.get("excludedRepos", []));   // store exclusions so new repos default to visible
+let preset = store.get("preset", "7d");
+let customRange = store.get("customRange", { from: shift(today(), -6), to: today() });
+let activeTile = store.get("activeTile", "range");
+let metricTab = store.get("metricTab", "prsMerged");
+
+const visible = (repo) => !excluded.has(repo);
+function noteRepos(list) { let changed = false; for (const r of list) if (!knownRepos.has(r)) { knownRepos.add(r); changed = true; } if (changed) { store.set("knownRepos", [...knownRepos].sort()); renderRepoMenu(); } }
+function renderRepoMenu() {
+  const repos = [...knownRepos].sort();
+  $("#repoList").innerHTML = repos.map((r) => `<label><input type="checkbox" data-repo="${esc(r)}" ${visible(r)?"checked":""}> ${esc(r)}</label>`).join("") || `<div class="empty">no repos seen yet</div>`;
+  const n = repos.filter(visible).length;
+  $("#repoBtn").textContent = `Repos: ${n === repos.length ? "all" : `${n}/${repos.length}`} ▾`;
+}
+$("#repoList").addEventListener("change", (e) => { const r = e.target.dataset.repo; if (e.target.checked) excluded.delete(r); else excluded.add(r); store.set("excludedRepos", [...excluded]); renderRepoMenu(); renderAll(); });
+$("#repoAll").onclick = () => { excluded.clear(); store.set("excludedRepos", []); renderRepoMenu(); renderAll(); };
+$("#repoNone").onclick = () => { excluded = new Set(knownRepos); store.set("excludedRepos", [...excluded]); renderRepoMenu(); renderAll(); };
+$("#repoBtn").onclick = () => $("#repoPanel").classList.toggle("open");
+document.addEventListener("click", (e) => { if (!$("#repoMenu").contains(e.target)) $("#repoPanel").classList.remove("open"); });
+
+// ---------- data ----------
+let live = null, daily = null;
+async function api(path) { const r = await fetch(path); const j = await r.json(); if (!r.ok) throw new Error(j.error || r.statusText); return j; }
+function setStatus(t, err) { $("#status").textContent = t; $("#status").className = "status" + (err ? " err" : ""); }
+
+function currentRange() {
+  const t = today();
+  if (preset === "today") return { from: t, to: t };
+  if (preset === "yesterday") return { from: shift(t,-1), to: shift(t,-1) };
+  if (preset === "7d") return { from: shift(t,-6), to: t };
+  if (preset === "30d") return { from: shift(t,-29), to: t };
+  return customRange;
+}
+// Window we fetch: always cover 30d back plus whatever custom range asks, so the tiles are always fillable.
+function fetchRange() {
+  const r = currentRange(); const t = today();
+  return { from: r.from < shift(t,-29) ? r.from : shift(t,-29), to: r.to > t ? r.to : t };
+}
+
+async function loadLive() {
+  try { live = await api("/api/live"); $("#who").textContent = live.user;
+    noteRepos([...live.issues, ...live.prs, ...live.reviewRequests].map((i) => i.repo)); renderLive(); }
+  catch (e) { setStatus("live: " + e.message, true); }
+}
+async function loadDaily(force) {
+  const { from, to } = fetchRange();
+  setStatus("loading activity…");
+  try { daily = await api(`/api/daily?from=${from}&to=${to}${force ? "&force=1" : ""}`);
+    const repos = new Set(); for (const m of Object.values(daily.metrics)) for (const l of Object.values(m)) for (const i of l) repos.add(i.repo);
+    noteRepos([...repos]); renderDaily(); setStatus(`updated ${new Date().toLocaleTimeString()}`); }
+  catch (e) { setStatus("daily: " + e.message, true); }
+}
+
+// ---------- live render ----------
+function inflightIssue(i) { return i.linkedPrs.length > 0; }
+function prPhase(p) {
+  if (p.draft) return ["draft", "pill"];
+  if (p.checks === "FAILURE" || p.checks === "ERROR") return ["checks red", "pill bad"];
+  if (p.reviewDecision === "CHANGES_REQUESTED") return ["changes requested", "pill warn"];
+  if (p.reviewDecision === "APPROVED") return ["approved", "pill good"];
+  if (p.checks === "PENDING") return ["checks running", "pill flight"];
+  return ["in review", "pill flight"];
+}
+function renderLive() {
+  if (!live) return;
+  const issues = live.issues.filter((i) => visible(i.repo)).sort((a,b) => b.updated_at.localeCompare(a.updated_at));
+  const inflight = issues.filter(inflightIssue).length;
+  $("#issueCount").textContent = issues.length;
+  $("#issueSub").innerHTML = `<span class="pill flight">${inflight} in-flight</span><span class="pill">${issues.length - inflight} not started</span>`;
+  $("#issueList").innerHTML = issues.length ? `<table><thead><tr><th>Issue</th><th>Status</th><th class="num">Updated</th></tr></thead><tbody>` +
+    issues.map((i) => `<tr><td><span class="repo">${esc(i.repo)}#${i.number}</span><a class="list-title" href="${i.url}" target="_blank">${esc(i.title)}</a></td>
+      <td>${inflightIssue(i) ? i.linkedPrs.map((p) => `<a class="pill flight" href="${p.url}" target="_blank">PR #${p.number}${p.draft ? " (draft)" : ""}</a>`).join("") : `<span class="pill">open</span>`}${i.labels.map((l) => `<span class="pill">${esc(l.name)}</span>`).join("")}</td>
+      <td class="num muted">${ago(i.updated_at)}</td></tr>`).join("") + "</tbody></table>" : `<div class="empty">nothing assigned</div>`;
+
+  const prs = live.prs.filter((p) => visible(p.repo)).sort((a,b) => b.updated_at.localeCompare(a.updated_at));
+  const drafts = prs.filter((p) => p.draft).length;
+  $("#prCount").textContent = prs.length;
+  $("#prSub").innerHTML = `<span class="pill flight">${prs.length - drafts} in review</span><span class="pill">${drafts} draft</span>`;
+  $("#hdrCounts").innerHTML = `<a href="#issues">Issues <b>${issues.length}</b> <span class="pill flight">${inflight} in-flight</span></a> &nbsp; <a href="#prs">PRs <b>${prs.length}</b> <span class="pill flight">${prs.length - drafts} in review</span></a>`;
+  $("#prList").innerHTML = prs.length ? prTable(prs) : `<div class="empty">no open PRs</div>`;
+  const rr = live.reviewRequests.filter((p) => visible(p.repo));
+  $("#rrSummary").textContent = `Review requested of me (${rr.length})`;
+  $("#rrList").innerHTML = rr.length ? prTable(rr) : `<div class="empty">none</div>`;
+}
+function prTable(prs) {
+  return `<table><thead><tr><th>PR</th><th>Status</th><th class="num">+/−</th><th class="num">Updated</th></tr></thead><tbody>` +
+    prs.map((p) => { const [t, c] = prPhase(p); return `<tr><td><span class="repo">${esc(p.repo)}#${p.number} · ${esc(p.head)} → ${esc(p.base)}</span><a class="list-title" href="${p.url}" target="_blank">${esc(p.title)}</a></td>
+      <td><span class="${c}">${t}</span>${p.mergeable === "CONFLICTING" ? `<span class="pill bad">conflicts</span>` : ""}${p.closes.map((i) => `<a class="pill" href="${i.url}" target="_blank">closes #${i.number}</a>`).join("")}${p.reviewers.map((r) => `<span class="pill">→ ${esc(r)}</span>`).join("")}</td>
+      <td class="num muted">+${p.additions} −${p.deletions}</td><td class="num muted">${ago(p.updated_at)}</td></tr>`; }).join("") + "</tbody></table>";
+}
+
+// ---------- daily render ----------
+function countIn(metric, from, to) {
+  let n = 0; for (const d in daily.metrics[metric]) if (d >= from && d <= to) n += daily.metrics[metric][d].filter((i) => visible(i.repo)).length; return n;
+}
+function itemsIn(metric, from, to) {
+  const out = []; for (const d in daily.metrics[metric]) if (d >= from && d <= to) for (const i of daily.metrics[metric][d]) if (visible(i.repo)) out.push({ ...i, day: d });
+  return out.sort((a,b) => b.day.localeCompare(a.day) || b.repo.localeCompare(a.repo));
+}
+function renderDaily() {
+  if (!daily) return;
+  const t = today(); const r = currentRange();
+  const windows = [
+    ["today", "Today", t, t], ["yesterday", "Yesterday", shift(t,-1), shift(t,-1)],
+    ["7d", "Last 7 days", shift(t,-6), t], ["30d", "Last 30 days", shift(t,-29), t],
+    ["range", `Selected: ${fmtDay(r.from)}${r.from !== r.to ? " – " + fmtDay(r.to) : ""}`, r.from, r.to],
+  ];
+  $("#tiles").innerHTML = windows.map(([id, label, from, to]) => `<button class="tile" data-tile="${id}" aria-pressed="${activeTile === id}">
+    <div class="label"><span>${label}</span></div>
+    <div class="nums">${SERIES.map(([m, name, col]) => `<div class="n"><b><span class="dot" style="background:${col}"></span>${countIn(m, from, to)}</b><span>${name.split(" ")[1].replace("(unmerged)","")} ${m.startsWith("pr") ? "PR" : "iss"}</span></div>`).join("")}</div></button>`).join("");
+  document.querySelectorAll(".tile").forEach((b) => b.onclick = () => { activeTile = b.dataset.tile; store.set("activeTile", activeTile); renderDaily(); });
+  for (const b of document.querySelectorAll("#presets button")) b.setAttribute("aria-pressed", b.dataset.p === preset);
+  $("#from").value = r.from; $("#to").value = r.to;
+  $("#rangeLabel").textContent = `${daily.days.length > 0 ? "" : ""}`;
+  drawChart(r.from, r.to);
+  renderRangeItems();
+}
+
+function drawChart(from, to) {
+  const days = []; for (let d = from; d <= to; d = shift(d, 1)) days.push(d);
+  const data = days.map((d) => ({ day: d, vals: SERIES.map(([m]) => (daily.metrics[m][d] || []).filter((i) => visible(i.repo)).length) }));
+  const max = Math.max(1, ...data.flatMap((r) => r.vals));
+  const svg = $("#chart"); const W = svg.clientWidth || 1000, H = 260, padL = 34, padR = 10, padT = 10, padB = 26;
+  const iw = W - padL - padR, ih = H - padT - padB;
+  const group = iw / days.length; const gap = Math.max(2, group * 0.2); const bw = Math.max(1, (group - gap) / SERIES.length - 2);
+  const y = (v) => padT + ih - (v / max) * ih;
+  const ticks = [...new Set([0, Math.round(max/2), max])];
+  let out = ticks.map((tk) => `<line x1="${padL}" x2="${W-padR}" y1="${y(tk)}" y2="${y(tk)}" stroke="var(--grid)"/><text x="${padL-6}" y="${y(tk)+4}" text-anchor="end">${tk}</text>`).join("");
+  out += `<line x1="${padL}" x2="${W-padR}" y1="${y(0)}" y2="${y(0)}" stroke="var(--axis)"/>`;
+  const labelEvery = Math.ceil(days.length / Math.floor(iw / 60));
+  data.forEach((row, i) => {
+    const gx = padL + i * group + gap / 2;
+    if (i % labelEvery === 0 || days.length === 1) out += `<text x="${gx + (group-gap)/2}" y="${H-8}" text-anchor="middle">${fmtDay(row.day)}</text>`;
+    out += `<rect class="hit" data-i="${i}" x="${padL + i*group}" y="${padT}" width="${group}" height="${ih}" fill="transparent"/>`;
+    row.vals.forEach((v, s) => { if (!v) return; const x = gx + s * (bw + 2); const h = y(0) - y(v);
+      out += `<rect x="${x}" y="${y(v)}" width="${bw}" height="${h}" rx="${Math.min(3, bw/2)}" fill="${SERIES[s][2]}" style="pointer-events:none"/>`;
+      if (days.length <= 14 && bw > 14) out += `<text x="${x+bw/2}" y="${y(v)-3}" text-anchor="middle" style="fill:var(--ink2)">${v}</text>`; });
+  });
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`); svg.innerHTML = out;
+  $("#legend").innerHTML = SERIES.map(([, n, c]) => `<span><span class="dot" style="background:${c}"></span>${n}</span>`).join("");
+  const tip = $("#tip");
+  svg.querySelectorAll(".hit").forEach((h) => {
+    h.onmouseenter = h.onmousemove = (e) => { const row = data[+h.dataset.i]; tip.style.display = "block";
+      tip.innerHTML = `<b>${fmtDay(row.day)}</b>` + SERIES.map(([, n, c], s) => `<div><span class="dot" style="background:${c}"></span>${n}: <b style="display:inline">${row.vals[s]}</b></div>`).join("");
+      const wr = $("#chartWrap").getBoundingClientRect(); tip.style.left = Math.min(e.clientX - wr.left + 12, wr.width - tip.offsetWidth - 4) + "px"; tip.style.top = (e.clientY - wr.top - 10) + "px"; };
+    h.onmouseleave = () => tip.style.display = "none";
+  });
+  $("#chartTable").innerHTML = `<table><thead><tr><th>Day</th>${SERIES.map(([, n]) => `<th class="num">${n}</th>`).join("")}</tr></thead><tbody>` +
+    data.map((r) => `<tr><td>${r.day}</td>${r.vals.map((v) => `<td class="num">${v}</td>`).join("")}</tr>`).join("") + "</tbody></table>";
+}
+
+function renderRangeItems() {
+  const t = today(); const r = currentRange();
+  const win = { today:[t,t], yesterday:[shift(t,-1),shift(t,-1)], "7d":[shift(t,-6),t], "30d":[shift(t,-29),t], range:[r.from,r.to] }[activeTile];
+  $("#itemsSub").textContent = `${fmtDay(win[0])}${win[0] !== win[1] ? " – " + fmtDay(win[1]) : ""}`;
+  $("#metricTabs").innerHTML = SERIES.map(([m, n, c]) => `<button class="seg" data-m="${m}" aria-pressed="${metricTab === m}"><span class="dot" style="background:${c}"></span>${n} · ${countIn(m, win[0], win[1])}</button>`).join("");
+  document.querySelectorAll("#metricTabs button").forEach((b) => b.onclick = () => { metricTab = b.dataset.m; store.set("metricTab", metricTab); renderRangeItems(); });
+  const items = itemsIn(metricTab, win[0], win[1]);
+  $("#rangeItems").innerHTML = items.length ? `<table><thead><tr><th>Day</th><th>Item</th><th>State</th></tr></thead><tbody>` +
+    items.map((i) => `<tr><td class="muted">${fmtDay(i.day)}</td><td><span class="repo">${esc(i.repo)}#${i.number}</span><a class="list-title" href="${i.url}" target="_blank">${esc(i.title)}</a></td>
+      <td>${i.merged_at ? `<span class="pill good">merged</span>` : i.state === "closed" ? `<span class="pill">${i.state_reason || "closed"}</span>` : `<span class="pill flight">${i.draft ? "draft" : "open"}</span>`}</td></tr>`).join("") + "</tbody></table>" : `<div class="empty">nothing here</div>`;
+}
+
+// ---------- controls ----------
+document.querySelectorAll("#presets button").forEach((b) => b.onclick = () => { preset = b.dataset.p; store.set("preset", preset); if (preset !== "custom") activeTile = { today:"today", yesterday:"yesterday", "7d":"7d", "30d":"30d" }[preset]; else activeTile = "range"; store.set("activeTile", activeTile); loadDaily(); });
+$("#apply").onclick = () => { const f = $("#from").value, t = $("#to").value; if (!f || !t) return; customRange = f <= t ? { from: f, to: t } : { from: t, to: f }; store.set("customRange", customRange); preset = "custom"; store.set("preset", preset); activeTile = "range"; store.set("activeTile", activeTile); loadDaily(); };
+$("#from").onchange = $("#to").onchange = () => { preset = "custom"; };
+$("#refresh").onclick = () => { loadLive(); loadDaily(true); };
+window.addEventListener("resize", () => daily && drawChart(currentRange().from, currentRange().to));
+function renderAll() { renderLive(); renderDaily(); }
+
+renderRepoMenu();
+api("/api/me").then((m) => $("#who").textContent = m.login).catch(() => {});
+loadLive(); loadDaily();
+setInterval(loadLive, 2 * 60 * 1000);
+setInterval(() => loadDaily(false), 5 * 60 * 1000);
+</script>
+</body>
+</html>
