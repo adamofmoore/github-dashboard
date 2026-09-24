@@ -37,10 +37,12 @@ body::before { content:""; position:fixed; inset:0; pointer-events:none; z-index
     radial-gradient(800px 380px at 92% -5%, var(--glow2), transparent 60%),
     radial-gradient(600px 300px at 50% 0%, var(--glow3), transparent 60%); }
 .wrap { position:relative; z-index:1; padding:0 28px 64px }
+@media (max-width:700px) { .wrap { padding:0 14px 48px } }
 a { color:inherit; text-decoration:none } a:hover { color:var(--accent-ink); text-decoration:underline }
 :focus-visible { outline:2px solid var(--focus); outline-offset:2px }
 
-.top { display:flex; align-items:center; gap:18px; padding:20px 0 16px; flex-wrap:wrap }
+.top { display:flex; align-items:center; gap:14px 18px; padding:20px 0 16px; flex-wrap:wrap }
+@media (max-width:700px) { .top .spacer { display:none } .top .hdrcounts { flex-basis:100%; order:5 } .top .status { order:6 } }
 .top h1 { margin:0; font-size:15px; font-weight:600; display:flex; align-items:center; gap:10px }
 .top h1 svg { width:24px; height:24px; fill:var(--ink) }
 .top h1 span { color:var(--muted); font-weight:500 }
@@ -64,7 +66,8 @@ input[type=date] { padding:4px 8px }
 
 section { padding:22px 0 8px; margin-top:8px }
 section > header { display:flex; align-items:baseline; gap:12px; margin-bottom:14px; flex-wrap:wrap }
-.grid2 section > header { flex-wrap:nowrap; min-height:24px } .grid2 section > header .sub { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0 } .grid2 .win-only { flex:none }
+.grid2 section > header { flex-wrap:nowrap; min-height:24px } .grid2 section > header h2 { white-space:nowrap } .grid2 section > header .sub { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; flex:1 } .grid2 .win-only { flex:none }
+@media (max-width:700px) { .grid2 section > header { flex-wrap:wrap } .grid2 section > header .sub { flex-basis:100%; white-space:normal; order:3 } .grid2 .win-only { margin-left:auto } }
 section > header h2 { margin:0; font-size:22px; font-weight:800; letter-spacing:-.03em; line-height:1.1; background:linear-gradient(90deg, var(--g1), var(--g2) 55%, var(--g3)); -webkit-background-clip:text; background-clip:text; color:transparent }
 section > header .count { font-size:20px; font-weight:800; color:var(--ink); letter-spacing:-.02em }
 section > header .sub { font-size:12.5px; color:var(--muted) }
@@ -74,14 +77,15 @@ section > header .sub { font-size:12.5px; color:var(--muted) }
 .toolbar label { font-size:12.5px; color:var(--ink2); display:inline-flex; align-items:center; gap:6px }
 
 .tiles { display:grid; grid-template-columns:repeat(5, minmax(0,1fr)); gap:10px; margin-bottom:22px }
-@media (max-width:1500px) { .tiles { grid-template-columns:repeat(3, 1fr) } }
-@media (max-width:900px) { .tiles { grid-template-columns:repeat(2, 1fr) } }
+@media (max-width:1500px) { .tiles { grid-template-columns:repeat(3, minmax(0,1fr)) } }
+@media (max-width:1000px) { .tiles { grid-template-columns:repeat(2, minmax(0,1fr)) } }
+@media (max-width:520px) { .tiles { grid-template-columns:minmax(0,1fr) } .tile .nums { grid-template-columns:repeat(2, minmax(0,1fr)) } }
 .tile { min-width:0; text-align:left; border:1px solid var(--border); border-radius:8px; padding:12px 14px; background:var(--surface); cursor:pointer; display:block; width:100% }
 .tile:hover { border-color:var(--btn-hover-border); background:var(--surface) }
 .tile[aria-pressed=true] { border-color:var(--accent); box-shadow:0 0 0 1px var(--accent) inset }
 .tile .label { font-size:13px; color:var(--ink2); margin-bottom:8px; font-weight:500 } .tile .label em { font-style:normal; color:var(--muted); font-weight:400; font-size:11.5px }
-.tile .nums { display:flex; gap:12px; flex-wrap:nowrap }
-.tile .n { display:flex; flex-direction:column; min-width:0; flex:1 }
+.tile .nums { display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:10px 12px }
+.tile .n { display:flex; flex-direction:column; min-width:0 }
 .tile .n b { font-size:20px; font-weight:700; letter-spacing:-.02em; line-height:1.1; white-space:nowrap }
 .tile .n span { font-size:11px; color:var(--muted); line-height:1.2 }
 .tile .n .avg { font-size:11.5px; color:var(--ink2); font-weight:600; margin-top:3px; white-space:nowrap }
@@ -96,8 +100,9 @@ svg text { fill:var(--muted); font-size:11px }
 .tip b { display:block; margin-bottom:4px; font-weight:600 } .tip div { display:flex; justify-content:space-between; gap:16px } .tip div b { display:inline; margin:0 }
 details summary { cursor:pointer; color:var(--muted); font-size:12.5px; margin-top:8px }
 
-.grid2 { display:grid; grid-template-columns:1fr 1fr; gap:0 32px } @media (max-width:1100px){ .grid2 { grid-template-columns:1fr } }
-.scroll { max-height:600px; overflow:auto; scrollbar-width:thin; scrollbar-color:var(--rule) transparent; border:1px solid var(--border); border-radius:8px; background:var(--surface) }
+.grid2 { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:0 32px } @media (max-width:1400px){ .grid2 { grid-template-columns:minmax(0,1fr) } }
+.grid2 section { min-width:0 }
+.scroll { max-height:600px; overflow:auto; overflow-x:auto; scrollbar-width:thin; scrollbar-color:var(--rule) transparent; border:1px solid var(--border); border-radius:8px; background:var(--surface) }
 table { width:100%; border-collapse:collapse }
 th { text-align:left; font-size:12px; color:var(--muted); font-weight:500; padding:8px 12px; border-bottom:1px solid var(--rule); position:sticky; top:0; background:var(--surface); z-index:1 }
 td { padding:9px 12px; border-bottom:1px solid var(--grid); vertical-align:top } tr:last-child td { border-bottom:0 }
@@ -106,7 +111,9 @@ td.num, th.num { text-align:right; white-space:nowrap }
 td.when { color:var(--muted); white-space:nowrap }
 .item { display:grid; gap:1px }
 .item .repo { font-size:12px; color:var(--muted) }
-.item .title { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:500; color:var(--ink) } .item .title:hover { color:var(--accent-ink) }
+.item { min-width:0 } .item .title { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:500; color:var(--ink); display:block }
+table { table-layout:fixed } th:first-child, td:first-child { width:auto } td.num, th.num { width:72px } th:nth-child(2), td:nth-child(2) { width:26% }
+@media (max-width:700px) { th:nth-child(2), td:nth-child(2) { width:40% } th.lines, td.lines { display:none } } .item .title:hover { color:var(--accent-ink) }
 .pill { display:inline-flex; align-items:center; font-size:11.5px; padding:1px 8px; border-radius:99px; border:1px solid var(--border); color:var(--ink2); margin:0 4px 3px 0; white-space:nowrap; font-weight:500 }
 .pill.good { color:var(--good); border-color:rgba(63,185,80,.4) } .pill.warn { color:var(--warn); border-color:rgba(210,153,34,.4) } .pill.bad { color:var(--bad); border-color:rgba(248,81,73,.4) }
 .pill.flight { color:var(--accent-ink); border-color:rgba(88,166,255,.5); background:rgba(88,166,255,.1) }
@@ -370,13 +377,13 @@ function renderLive() {
   $("#rrList").innerHTML = rr.length ? prTable(rr) : `<div class="empty">No review requests.</div>`;
 }
 function prTable(prs) {
-  return `<table><thead><tr><th>Pull request</th><th>Status</th><th class="num">Lines</th><th class="num">Updated</th></tr></thead><tbody>` +
+  return `<table><thead><tr><th>Pull request</th><th>Status</th><th class="num lines">Lines</th><th class="num">Updated</th></tr></thead><tbody>` +
     prs.map((p) => {
-      if (p.merged_at) return `<tr><td><div class="item"><span class="repo">${esc(p.repo)} #${p.number}</span><a class="title" href="${p.url}" target="_blank">${esc(p.title)}</a></div></td><td><span class="pill good">Merged</span></td><td class="num when"></td><td class="num when">${ago(p.merged_at)}</td></tr>`;
+      if (p.merged_at) return `<tr><td><div class="item"><span class="repo">${esc(p.repo)} #${p.number}</span><a class="title" href="${p.url}" target="_blank">${esc(p.title)}</a></div></td><td><span class="pill good">Merged</span></td><td class="num when lines"></td><td class="num when">${ago(p.merged_at)}</td></tr>`;
       const [t, c] = prPhase(p);
       return `<tr><td><div class="item"><span class="repo">${esc(p.repo)} #${p.number} — ${esc(p.head)}</span><a class="title" href="${p.url}" target="_blank">${esc(p.title)}</a></div></td>
       <td><span class="${c}">${t}</span>${p.mergeable === "CONFLICTING" ? `<span class="pill bad">Conflicts</span>` : ""}${p.closes.map((i) => `<a class="pill" href="${i.url}" target="_blank">Closes #${i.number}</a>`).join("")}${p.reviewers.map((r) => `<span class="pill">${esc(r)}</span>`).join("")}</td>
-      <td class="num when">+${p.additions} −${p.deletions}</td><td class="num when">${ago(p.updated_at)}</td></tr>`; }).join("") + "</tbody></table>";
+      <td class="num when lines">+${p.additions} −${p.deletions}</td><td class="num when">${ago(p.updated_at)}</td></tr>`; }).join("") + "</tbody></table>";
 }
 function countIn(metric, from, to) {
   let n = 0; for (const d in daily.metrics[metric]) if (d >= from && d <= to) n += daily.metrics[metric][d].filter((i) => visible(i.repo)).length; return n;
