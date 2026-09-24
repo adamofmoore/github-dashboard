@@ -4,6 +4,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { demoDaily, demoLive, demoRepos } from "./demo.mjs";
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 4747);
@@ -13,6 +14,7 @@ const CACHE_DIR = path.join(ROOT, "cache");
 const SESSIONS_FILE = path.join(CACHE_DIR, "sessions.json");
 const API = "https://api.github.com";
 const WARM_DAYS = 90;
+const DEMO = process.env.DEMO === "1";
 fs.mkdirSync(CACHE_DIR, { recursive: true });
 
 // ---------- owner token from gh ----------
@@ -255,8 +257,7 @@ async function warm() {
   }
   warming = false;
 }
-setTimeout(warm, 500);
-setInterval(warm, 5 * 60 * 1000);
+if (!DEMO) { setTimeout(warm, 500); setInterval(warm, 5 * 60 * 1000); }
 
 // ---------- http ----------
 const MIME = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml", ".json": "application/json" };
@@ -266,6 +267,16 @@ function readBody(req) { return new Promise((r) => { let s = ""; req.on("data", 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
   try {
+    if (DEMO && url.pathname.startsWith("/api/")) {
+      if (url.pathname === "/api/auth/status" || url.pathname === "/api/me") return send(res, 200, { loggedIn: true, login: "octocat", owner: true, deviceFlow: false });
+      if (url.pathname === "/api/live") return send(res, 200, demoLive(today()));
+      if (url.pathname === "/api/repos") return send(res, 200, { repos: demoRepos });
+      if (url.pathname === "/api/daily") {
+        const to = url.searchParams.get("to") || today(), from = url.searchParams.get("from") || to, days = daysBetween(from, to);
+        return send(res, 200, { user: "octocat", from, to, today: today(), days, metrics: demoDaily(days, today()) });
+      }
+      return send(res, 404, { error: "not found" });
+    }
     if (url.pathname === "/api/auth/status") {
       const s = sessionFor(req);
       if (!s) return send(res, 200, { loggedIn: false, deviceFlow: Boolean(CLIENT_ID) });
