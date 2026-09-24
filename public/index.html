@@ -262,7 +262,7 @@ table { table-layout:fixed } th:first-child, td:first-child { width:auto } td.nu
     <section id="issues">
       <header><h2>Assigned to me</h2><span id="issueCount" hidden>–</span><span class="sub" id="issueSub"></span>
         <label class="win-only"><input type="checkbox" id="issueWin"> Only selected window</label></header>
-      <div class="segs list-filter" id="issueFilter"><button data-f="all">All</button><button data-f="open">Open</button><button data-f="inflight">In flight</button><button data-f="closed">Closed</button></div>
+      <div class="segs list-filter" id="issueFilter"><button data-f="open">Open</button><button data-f="inflight">In flight</button><button data-f="closed">Closed</button></div>
       <div id="issueList" class="scroll"></div>
     </section>
     <section id="prs">
@@ -323,7 +323,8 @@ let preset = store.get("preset", "7d");
 let customRange = store.get("customRange", { from: shift(today(), -6), to: today() });
 let activeTile = store.get("activeTile", "range");
 let winOnly = store.get("winOnly", { issues: false, prs: false });
-let listFilter = store.get("listFilter", { issues: "all", prs: "all" });
+let listFilter = store.get("listFilter", { issues: "open", prs: "all" });
+if (listFilter.issues === "all") listFilter.issues = "open";
 const HIST_DAYS = 30;
 let chartH = store.get("chartH", 280);
 $("#chartDetails").open = store.get("chartOpen", false);
@@ -407,9 +408,9 @@ function renderLive() {
   const openIssues = live.issues.filter((i) => visible(i.repo) && (!winOnly.issues || inWindow(i.updated_at, win))).sort((a,b) => b.updated_at.localeCompare(a.updated_at));
   const inflight = openIssues.filter(inflightIssue);
   const closedIssues = recent("issuesClosed", winOnly.issues ? win : null).filter((i) => i.state === "closed").sort((a,b) => b.closed_at.localeCompare(a.closed_at));
-  const issueSets = { open: openIssues, inflight, closed: closedIssues, all: [...openIssues, ...closedIssues] };
+  const issueSets = { open: openIssues, inflight, closed: closedIssues };
   $("#issueSub").textContent = winOnly.issues ? `${winLabel}: open items updated in window, closed items closed in window` : `${inflight.length} in flight, ${openIssues.length - inflight.length} not started, ${closedIssues.length} closed in ${HIST_DAYS}d`;
-  document.querySelectorAll("#issueFilter button").forEach((b) => { b.setAttribute("aria-pressed", b.dataset.f === listFilter.issues); b.textContent = `${{all:"All",open:"Open",inflight:"In flight",closed:"Closed"}[b.dataset.f]} ${issueSets[b.dataset.f].length}`; });
+  document.querySelectorAll("#issueFilter button").forEach((b) => { b.setAttribute("aria-pressed", b.dataset.f === listFilter.issues); b.textContent = `${{open:"Open",inflight:"In flight",closed:"Closed"}[b.dataset.f]} ${issueSets[b.dataset.f].length}`; });
   const issues = issueSets[listFilter.issues];
   $("#issueList").innerHTML = issues.length ? `<table><thead><tr><th>Issue</th><th>Progress</th><th class="num">${listFilter.issues === "closed" ? "Closed" : "Updated"}</th></tr></thead><tbody>` +
     issues.map((i) => `<tr><td><div class="item"><span class="repo">${esc(i.repo)} #${i.number}</span><a class="title" href="${i.url}" target="_blank">${esc(i.title)}</a></div></td>
