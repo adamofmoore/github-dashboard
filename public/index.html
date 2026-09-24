@@ -91,11 +91,13 @@ section > header .sub { font-size:12.5px; color:var(--muted) }
 .tile { min-width:0; text-align:left; border:1px solid var(--border); border-radius:8px; padding:12px 14px; background:var(--surface); cursor:pointer; display:block; width:100% }
 .tile:hover { border-color:var(--btn-hover-border); background:var(--surface) }
 .tile[aria-pressed=true] { border-color:var(--accent); box-shadow:0 0 0 1px var(--accent) inset }
-.tile .label { font-size:13px; color:var(--ink2); margin-bottom:8px; font-weight:500 }
+.tile .label { font-size:13px; color:var(--ink2); margin-bottom:8px; font-weight:500 } .tile .label em { font-style:normal; color:var(--muted); font-weight:400; font-size:11.5px }
 .tile .nums { display:flex; gap:12px; flex-wrap:nowrap }
 .tile .n { display:flex; flex-direction:column; min-width:0; flex:1 }
 .tile .n b { font-size:20px; font-weight:700; letter-spacing:-.02em; line-height:1.1; white-space:nowrap }
 .tile .n span { font-size:11px; color:var(--muted); line-height:1.2 }
+.tile .n .avg { font-size:11.5px; color:var(--ink2); font-weight:600; margin-top:3px; white-space:nowrap }
+.tile .n .avg em { font-style:normal; color:var(--muted); font-weight:400 }
 
 .chart-wrap { position:relative; background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:14px 14px 8px }
 svg text { fill:var(--muted); font-size:11px }
@@ -252,6 +254,8 @@ const dayKey = (d) => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate
 const shift = (key, n) => { const [y,m,d] = key.split("-").map(Number); return dayKey(new Date(y, m-1, d+n)); };
 const today = () => dayKey(new Date());
 const fmtDay = (k) => { const [y,m,d] = k.split("-").map(Number); return new Date(y,m-1,d).toLocaleDateString(undefined,{month:"short",day:"numeric"}); };
+const daysBetween = (a, b) => { const out = []; for (let d = a; d <= b; d = shift(d, 1)) out.push(d); return out; };
+const fmtAvg = (v) => v >= 100 ? Math.round(v).toString() : v >= 10 ? v.toFixed(1) : v.toFixed(2).replace(/\.?0+$/, "");
 const fmtRange = (a, b) => a === b ? fmtDay(a) : `${fmtDay(a)} to ${fmtDay(b)}`;
 const ago = (iso) => { const s = (Date.now()-new Date(iso))/1000; if (s<3600) return `${Math.round(s/60)}m`; if (s<86400) return `${Math.round(s/3600)}h`; return `${Math.round(s/86400)}d`; };
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
@@ -417,9 +421,10 @@ function renderDaily() {
   const r = currentRange();
   renderHero();
   const windows = [["today","Today"],["yesterday","Yesterday"],["7d","Last 7 days"],["30d","Last 30 days"],["range",`Selected, ${fmtRange(r.from, r.to)}`]];
-  $("#tiles").innerHTML = windows.map(([id, label]) => { const [from, to] = windowFor(id); return `<button class="tile" data-tile="${id}" aria-pressed="${activeTile === id}">
-    <div class="label"><span>${label}</span></div>
-    <div class="nums">${SERIES.map(([m, , col, short]) => `<div class="n"><b><span class="dot" style="background:${col}"></span>${countIn(m, from, to)}</b><span>${short}</span></div>`).join("")}</div></button>`; }).join("");
+  $("#tiles").innerHTML = windows.map(([id, label]) => { const [from, to] = windowFor(id); const nDays = daysBetween(from, to).length;
+    return `<button class="tile" data-tile="${id}" aria-pressed="${activeTile === id}">
+    <div class="label"><span>${label}</span>${nDays > 1 ? ` <em>· ${nDays} days, per-day average below</em>` : ""}</div>
+    <div class="nums">${SERIES.map(([m, , col, short]) => { const n = countIn(m, from, to); return `<div class="n"><b><span class="dot" style="background:${col}"></span>${n}</b><span>${short}</span>${nDays > 1 ? `<span class="avg">${fmtAvg(n / nDays)}<em>/day</em></span>` : ""}</div>`; }).join("")}</div></button>`; }).join("");
   document.querySelectorAll(".tile").forEach((b) => b.onclick = () => { activeTile = b.dataset.tile; store.set("activeTile", activeTile); renderDaily(); });
   for (const b of document.querySelectorAll("#presets button")) b.setAttribute("aria-pressed", b.dataset.p === preset);
   $("#from").value = r.from; $("#to").value = r.to;
