@@ -262,13 +262,13 @@ table { table-layout:fixed } th:first-child, td:first-child { width:auto } td.nu
     <section id="issues">
       <header><h2>Assigned to me</h2><span id="issueCount" hidden>–</span><span class="sub" id="issueSub"></span>
         <label class="win-only"><input type="checkbox" id="issueWin"> Only selected window</label></header>
-      <div class="segs list-filter" id="issueFilter"><button data-f="all">Open + closed</button><button data-f="open">Open</button><button data-f="inflight">In flight</button><button data-f="closed">Closed</button></div>
+      <div class="segs list-filter" id="issueFilter"><button data-f="all">All</button><button data-f="open">Open</button><button data-f="inflight">In flight</button><button data-f="closed">Closed</button></div>
       <div id="issueList" class="scroll"></div>
     </section>
     <section id="prs">
       <header><h2>My pull requests</h2><span id="prCount" hidden>–</span><span class="sub" id="prSub"></span>
         <label class="win-only"><input type="checkbox" id="prWin"> Only selected window</label></header>
-      <div class="segs list-filter" id="prFilter"><button data-f="all">Open + merged</button><button data-f="open">Open</button><button data-f="merged">Merged</button></div>
+      <div class="segs list-filter" id="prFilter"><button data-f="all">All</button><button data-f="open">Open</button><button data-f="merged">Merged</button></div>
       <div id="prList" class="scroll"></div>
       <details><summary id="rrSummary">Waiting on my review</summary><div id="rrList"></div></details>
     </section>
@@ -409,7 +409,7 @@ function renderLive() {
   const closedIssues = recent("issuesClosed", winOnly.issues ? win : null).filter((i) => i.state === "closed").sort((a,b) => b.closed_at.localeCompare(a.closed_at));
   const issueSets = { open: openIssues, inflight, closed: closedIssues, all: [...openIssues, ...closedIssues] };
   $("#issueSub").textContent = winOnly.issues ? `${winLabel}: open items updated in window, closed items closed in window` : `${inflight.length} in flight, ${openIssues.length - inflight.length} not started, ${closedIssues.length} closed in ${HIST_DAYS}d`;
-  document.querySelectorAll("#issueFilter button").forEach((b) => { b.setAttribute("aria-pressed", b.dataset.f === listFilter.issues); b.textContent = `${{all:"Open + closed",open:"Open",inflight:"In flight",closed:"Closed"}[b.dataset.f]} ${issueSets[b.dataset.f].length}`; });
+  document.querySelectorAll("#issueFilter button").forEach((b) => { b.setAttribute("aria-pressed", b.dataset.f === listFilter.issues); b.textContent = `${{all:"All",open:"Open",inflight:"In flight",closed:"Closed"}[b.dataset.f]} ${issueSets[b.dataset.f].length}`; });
   const issues = issueSets[listFilter.issues];
   $("#issueList").innerHTML = issues.length ? `<table><thead><tr><th>Issue</th><th>Progress</th><th class="num">${listFilter.issues === "closed" ? "Closed" : "Updated"}</th></tr></thead><tbody>` +
     issues.map((i) => `<tr><td><div class="item"><span class="repo">${esc(i.repo)} #${i.number}</span><a class="title" href="${i.url}" target="_blank">${esc(i.title)}</a></div></td>
@@ -421,7 +421,7 @@ function renderLive() {
   const mergedPrs = recent("prsMerged", winOnly.prs ? win : null).filter((p) => p.merged_at).sort((a,b) => b.merged_at.localeCompare(a.merged_at));
   const prSets = { open: openPrs, merged: mergedPrs, all: [...openPrs, ...mergedPrs] };
   $("#prSub").textContent = winOnly.prs ? `${winLabel}: open PRs updated in window, merged PRs merged in window` : `${openPrs.length - drafts} in review, ${drafts} draft, ${mergedPrs.length} merged in ${HIST_DAYS}d`;
-  document.querySelectorAll("#prFilter button").forEach((b) => { b.setAttribute("aria-pressed", b.dataset.f === listFilter.prs); b.textContent = `${{all:"Open + merged",open:"Open",merged:"Merged"}[b.dataset.f]} ${prSets[b.dataset.f].length}`; });
+  document.querySelectorAll("#prFilter button").forEach((b) => { b.setAttribute("aria-pressed", b.dataset.f === listFilter.prs); b.textContent = `${{all:"All",open:"Open",merged:"Merged"}[b.dataset.f]} ${prSets[b.dataset.f].length}`; });
   const allIssues = live.issues.filter((i) => visible(i.repo)), allPrs = live.prs.filter((p) => visible(p.repo));
   $("#hdrCounts").innerHTML = `<a href="#issues"><b>${allIssues.length}</b>issues, ${allIssues.filter(inflightIssue).length} in flight</a><a href="#prs"><b>${allPrs.length}</b>PRs, ${allPrs.filter((p) => !p.draft).length} in review</a>`;
   $("#issueCount").textContent = issueSets[listFilter.issues].length; $("#prCount").textContent = prSets[listFilter.prs].length;
