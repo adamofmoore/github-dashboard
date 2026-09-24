@@ -126,7 +126,7 @@ table { table-layout:fixed } th:first-child, td:first-child { width:auto } td.nu
   #issueList td.num, #prList td.num, #rrList td.num { text-align:left; display:inline-block; padding-top:0; padding-bottom:8px }
   #issueList td.num::before, #prList td.num::before, #rrList td.num::before { content:"updated "; color:var(--muted) }
   .item .repo { white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
-  .grid2 section > header { flex-wrap:wrap; align-items:center } .grid2 section > header h2 { flex:1 1 auto } .grid2 section > header .count { order:0 } .grid2 section > header .sub { display:none } .grid2 .win-only { order:3; flex-basis:100%; margin:4px 0 0 }
+  .grid2 section > header { flex-wrap:wrap; align-items:center } .grid2 section > header h2 { flex:1 1 auto } .grid2 section > header .sub { display:none } .grid2 .win-only { order:3; flex-basis:100%; margin:4px 0 0 }
   tbody tr:hover td { background:transparent } #issueList tr:hover, #prList tr:hover, #rrList tr:hover { background:var(--hover) }
   .list-filter button { padding:6px 4px; font-size:12.5px }
 } .item .title:hover { color:var(--accent-ink) }
@@ -260,13 +260,13 @@ table { table-layout:fixed } th:first-child, td:first-child { width:auto } td.nu
 
   <div class="grid2">
     <section id="issues">
-      <header><h2>Assigned to me</h2><span class="count" id="issueCount">–</span><span class="sub" id="issueSub"></span>
+      <header><h2>Assigned to me</h2><span id="issueCount" hidden>–</span><span class="sub" id="issueSub"></span>
         <label class="win-only"><input type="checkbox" id="issueWin"> Only selected window</label></header>
       <div class="segs list-filter" id="issueFilter"><button data-f="all">Open + closed</button><button data-f="open">Open</button><button data-f="inflight">In flight</button><button data-f="closed">Closed</button></div>
       <div id="issueList" class="scroll"></div>
     </section>
     <section id="prs">
-      <header><h2>My pull requests</h2><span class="count" id="prCount">–</span><span class="sub" id="prSub"></span>
+      <header><h2>My pull requests</h2><span id="prCount" hidden>–</span><span class="sub" id="prSub"></span>
         <label class="win-only"><input type="checkbox" id="prWin"> Only selected window</label></header>
       <div class="segs list-filter" id="prFilter"><button data-f="all">Open + merged</button><button data-f="open">Open</button><button data-f="merged">Merged</button></div>
       <div id="prList" class="scroll"></div>
