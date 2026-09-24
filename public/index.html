@@ -80,7 +80,8 @@ section > header { display:flex; align-items:baseline; gap:12px; margin-bottom:1
 section > header h2 { margin:0; font-size:15px; font-weight:600 }
 section > header .count { font-size:15px; font-weight:700; color:var(--ink) }
 section > header .sub { font-size:12.5px; color:var(--muted) }
-.list-filter { margin-left:auto } .list-filter button { padding:2px 9px; font-size:12px }
+.win-only { margin-left:auto; font-size:12px; color:var(--ink2); display:inline-flex; align-items:center; gap:6px; cursor:pointer }
+.list-filter { margin-left:0 } .list-filter button { padding:2px 9px; font-size:12px }
 .toolbar { display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-bottom:16px }
 .toolbar label { font-size:12.5px; color:var(--ink2); display:inline-flex; align-items:center; gap:6px }
 
@@ -151,7 +152,7 @@ td.when { color:var(--muted); white-space:nowrap }
 @keyframes shimmer { from { transform:translateX(-100%) } to { transform:translateX(100%) } }
 .sk-row { height:38px; margin:8px 12px; border-radius:6px }
 .loading .tile b, .loading .stat .big, .loading .stat .delta, .loading .hdrcounts b { composes:sk }
-.busy .n b, .busy .stat .big, .busy .stat .delta, .busy #metricTabs button, .busy #legend { color:transparent; background:var(--chip); border-radius:4px; animation:pulse 1.2s ease-in-out infinite }
+.busy .n b, .busy .stat .big, .busy .stat .delta, .busy #legend { color:transparent; background:var(--chip); border-radius:4px; animation:pulse 1.2s ease-in-out infinite }
 .busy .n b .dot, .busy #legend .dot { visibility:hidden }
 .busy #chart { opacity:.35 }
 @keyframes pulse { 50% { opacity:.55 } }
@@ -220,21 +221,15 @@ td.when { color:var(--muted); white-space:nowrap }
     <details><summary>Show as table</summary><div id="chartTable"></div></details>
   </section>
 
-  <section>
-    <header><h2>Items in window</h2><span class="sub" id="itemsSub"></span></header>
-    <div class="segs metric-tabs" id="metricTabs"></div>
-    <div id="rangeItems" class="scroll"></div>
-  </section>
-
   <div class="grid2">
     <section id="issues">
       <header><h2>Assigned to me</h2><span class="count" id="issueCount">–</span><span class="sub" id="issueSub"></span>
-        <div class="segs list-filter" id="issueFilter"><button data-f="all">All</button><button data-f="open">Open</button><button data-f="inflight">In flight</button><button data-f="closed">Closed</button></div></header>
+        <label class="win-only"><input type="checkbox" id="issueWin"> Only selected window</label><div class="segs list-filter" id="issueFilter"><button data-f="all">All</button><button data-f="open">Open</button><button data-f="inflight">In flight</button><button data-f="closed">Closed</button></div></header>
       <div id="issueList" class="scroll"></div>
     </section>
     <section id="prs">
       <header><h2>My pull requests</h2><span class="count" id="prCount">–</span><span class="sub" id="prSub"></span>
-        <div class="segs list-filter" id="prFilter"><button data-f="all">All</button><button data-f="open">Open</button><button data-f="merged">Merged</button></div></header>
+        <label class="win-only"><input type="checkbox" id="prWin"> Only selected window</label><div class="segs list-filter" id="prFilter"><button data-f="all">All</button><button data-f="open">Open</button><button data-f="merged">Merged</button></div></header>
       <div id="prList" class="scroll"></div>
       <details><summary id="rrSummary">Waiting on my review</summary><div id="rrList"></div></details>
     </section>
@@ -272,8 +267,6 @@ function skeletons() {
   $("#hero").innerHTML = SERIES.map(([, name, col]) => `<div class="stat" style="--c:${col}"><div class="big sk" style="width:70px">0</div><div class="name">${name}</div><div class="delta sk" style="width:120px">&nbsp;</div></div>`).join("");
   $("#tiles").innerHTML = ["Today","Yesterday","Last 7 days","Last 30 days","Selected"].map((l) => `<div class="tile"><div class="label">${l}</div><div class="nums">${SERIES.map(([, , , short]) => `<div class="n"><b class="sk">00</b><span>${short}</span></div>`).join("")}</div></div>`).join("");
   $("#legend").innerHTML = SERIES.map(([, n, c]) => `<span><span class="dot" style="background:${c}"></span>${n}</span>`).join("");
-  $("#metricTabs").innerHTML = SERIES.map(([, n]) => `<button class="sk">${n} 000</button>`).join("");
-  $("#rangeItems").innerHTML = skRows(6);
   $("#issueList").innerHTML = skRows(6);
   $("#prList").innerHTML = skRows(5);
 }
@@ -282,7 +275,7 @@ let excluded = new Set(store.get("excludedRepos", []));
 let preset = store.get("preset", "7d");
 let customRange = store.get("customRange", { from: shift(today(), -6), to: today() });
 let activeTile = store.get("activeTile", "range");
-let metricTab = store.get("metricTab", "prsMerged");
+let winOnly = store.get("winOnly", { issues: false, prs: false });
 let listFilter = store.get("listFilter", { issues: "all", prs: "all" });
 const HIST_DAYS = 30;
 let chartH = store.get("chartH", 280);
@@ -350,20 +343,23 @@ function prPhase(p) {
   return ["In review", "pill flight"];
 }
 const itemKey = (i) => `${i.repo}#${i.number}`;
-function recent(metric) {
+function recent(metric, win) {
   if (!daily) return [];
-  const t = today(), from = shift(t, -(HIST_DAYS - 1)), m = new Map();
-  for (const i of itemsIn(metric, from, t)) if (!m.has(itemKey(i))) m.set(itemKey(i), i);
+  const t = today(), [from, to] = win || [shift(t, -(HIST_DAYS - 1)), t], m = new Map();
+  for (const i of itemsIn(metric, from, t)) if (i.day <= to && !m.has(itemKey(i))) m.set(itemKey(i), i);
   return [...m.values()];
 }
+const inWindow = (iso, win) => { const k = dayKey(new Date(iso)); return k >= win[0] && k <= win[1]; };
 function renderLive() {
   if (!live) return;
-  const openIssues = live.issues.filter((i) => visible(i.repo)).sort((a,b) => b.updated_at.localeCompare(a.updated_at));
+  const win = windowFor(activeTile);
+  const winLabel = fmtRange(win[0], win[1]);
+  $("#issueWin").checked = winOnly.issues; $("#prWin").checked = winOnly.prs;
+  const openIssues = live.issues.filter((i) => visible(i.repo) && (!winOnly.issues || inWindow(i.updated_at, win))).sort((a,b) => b.updated_at.localeCompare(a.updated_at));
   const inflight = openIssues.filter(inflightIssue);
-  const closedIssues = recent("issuesClosed").filter((i) => i.state === "closed").sort((a,b) => b.closed_at.localeCompare(a.closed_at));
+  const closedIssues = recent("issuesClosed", winOnly.issues ? win : null).filter((i) => i.state === "closed").sort((a,b) => b.closed_at.localeCompare(a.closed_at));
   const issueSets = { open: openIssues, inflight, closed: closedIssues, all: [...openIssues, ...closedIssues] };
-  $("#issueCount").textContent = openIssues.length;
-  $("#issueSub").textContent = `${inflight.length} in flight, ${openIssues.length - inflight.length} not started, ${closedIssues.length} closed in ${HIST_DAYS}d`;
+  $("#issueSub").textContent = winOnly.issues ? `${winLabel}: open items updated in window, closed items closed in window` : `${inflight.length} in flight, ${openIssues.length - inflight.length} not started, ${closedIssues.length} closed in ${HIST_DAYS}d`;
   document.querySelectorAll("#issueFilter button").forEach((b) => { b.setAttribute("aria-pressed", b.dataset.f === listFilter.issues); b.textContent = `${{all:"All",open:"Open",inflight:"In flight",closed:"Closed"}[b.dataset.f]} ${issueSets[b.dataset.f].length}`; });
   const issues = issueSets[listFilter.issues];
   $("#issueList").innerHTML = issues.length ? `<table><thead><tr><th>Issue</th><th>Progress</th><th class="num">${listFilter.issues === "closed" ? "Closed" : "Updated"}</th></tr></thead><tbody>` +
@@ -371,14 +367,15 @@ function renderLive() {
       <td>${i.state === "closed" ? `<span class="pill">${i.state_reason === "not_planned" ? "Not planned" : "Closed"}</span>` : inflightIssue(i) ? i.linkedPrs.map((p) => `<a class="pill flight" href="${p.url}" target="_blank">PR #${p.number}${p.draft ? " draft" : ""}</a>`).join("") : `<span class="pill">Not started</span>`}${(i.labels || []).map((l) => `<span class="pill">${esc(l.name)}</span>`).join("")}</td>
       <td class="num when">${ago(i.closed_at && i.state === "closed" ? i.closed_at : i.updated_at || i.created_at)}</td></tr>`).join("") + "</tbody></table>" : `<div class="empty">Nothing here in the selected repos.</div>`;
 
-  const openPrs = live.prs.filter((p) => visible(p.repo)).sort((a,b) => b.updated_at.localeCompare(a.updated_at));
+  const openPrs = live.prs.filter((p) => visible(p.repo) && (!winOnly.prs || inWindow(p.updated_at, win))).sort((a,b) => b.updated_at.localeCompare(a.updated_at));
   const drafts = openPrs.filter((p) => p.draft).length;
-  const mergedPrs = recent("prsMerged").filter((p) => p.merged_at).sort((a,b) => b.merged_at.localeCompare(a.merged_at));
+  const mergedPrs = recent("prsMerged", winOnly.prs ? win : null).filter((p) => p.merged_at).sort((a,b) => b.merged_at.localeCompare(a.merged_at));
   const prSets = { open: openPrs, merged: mergedPrs, all: [...openPrs, ...mergedPrs] };
-  $("#prCount").textContent = openPrs.length;
-  $("#prSub").textContent = `${openPrs.length - drafts} in review, ${drafts} draft, ${mergedPrs.length} merged in ${HIST_DAYS}d`;
+  $("#prSub").textContent = winOnly.prs ? `${winLabel}: open PRs updated in window, merged PRs merged in window` : `${openPrs.length - drafts} in review, ${drafts} draft, ${mergedPrs.length} merged in ${HIST_DAYS}d`;
   document.querySelectorAll("#prFilter button").forEach((b) => { b.setAttribute("aria-pressed", b.dataset.f === listFilter.prs); b.textContent = `${{all:"All",open:"Open",merged:"Merged"}[b.dataset.f]} ${prSets[b.dataset.f].length}`; });
-  $("#hdrCounts").innerHTML = `<a href="#issues"><b>${openIssues.length}</b>issues, ${inflight.length} in flight</a><a href="#prs"><b>${openPrs.length}</b>PRs, ${openPrs.length - drafts} in review</a>`;
+  const allIssues = live.issues.filter((i) => visible(i.repo)), allPrs = live.prs.filter((p) => visible(p.repo));
+  $("#hdrCounts").innerHTML = `<a href="#issues"><b>${allIssues.length}</b>issues, ${allIssues.filter(inflightIssue).length} in flight</a><a href="#prs"><b>${allPrs.length}</b>PRs, ${allPrs.filter((p) => !p.draft).length} in review</a>`;
+  $("#issueCount").textContent = allIssues.length; $("#prCount").textContent = allPrs.length;
   if (!daily) $("#status").textContent = "Loading activity";
   const prs = prSets[listFilter.prs];
   $("#prList").innerHTML = prs.length ? prTable(prs) : `<div class="empty">No pull requests here in the selected repos.</div>`;
@@ -427,7 +424,7 @@ function renderDaily() {
   for (const b of document.querySelectorAll("#presets button")) b.setAttribute("aria-pressed", b.dataset.p === preset);
   $("#from").value = r.from; $("#to").value = r.to;
   drawChart(r.from, r.to);
-  renderRangeItems();
+  renderLive();
 }
 
 function drawChart(from, to) {
@@ -463,20 +460,12 @@ function drawChart(from, to) {
     data.map((r) => `<tr><td>${r.day}</td>${r.vals.map((v) => `<td class="num">${v}</td>`).join("")}</tr>`).join("") + "</tbody></table>";
 }
 
-function renderRangeItems() {
-  const win = windowFor(activeTile);
-  $("#itemsSub").textContent = fmtRange(win[0], win[1]);
-  $("#metricTabs").innerHTML = SERIES.map(([m, n, c]) => `<button data-m="${m}" aria-pressed="${metricTab === m}"><span class="dot" style="background:${c}"></span>${n} ${countIn(m, win[0], win[1])}</button>`).join("");
-  document.querySelectorAll("#metricTabs button").forEach((b) => b.onclick = () => { metricTab = b.dataset.m; store.set("metricTab", metricTab); renderRangeItems(); });
-  const items = itemsIn(metricTab, win[0], win[1]);
-  $("#rangeItems").innerHTML = items.length ? `<table><thead><tr><th>Day</th><th>Item</th><th>State</th></tr></thead><tbody>` +
-    items.map((i) => `<tr><td class="when">${fmtDay(i.day)}</td><td><div class="item"><span class="repo">${esc(i.repo)} #${i.number}</span><a class="title" href="${i.url}" target="_blank">${esc(i.title)}</a></div></td>
-      <td>${i.merged_at ? `<span class="pill good">Merged</span>` : i.state === "closed" ? `<span class="pill">${i.state_reason === "not_planned" ? "Not planned" : i.state_reason === "completed" ? "Completed" : "Closed"}</span>` : `<span class="pill flight">${i.draft ? "Draft" : "Open"}</span>`}</td></tr>`).join("") + "</tbody></table>" : `<div class="empty">Nothing in this window. Pick another tile or widen the range.</div>`;
-}
 
 document.querySelectorAll("#presets button").forEach((b) => b.onclick = () => { preset = b.dataset.p; store.set("preset", preset); activeTile = preset === "custom" ? "range" : preset; store.set("activeTile", activeTile); loadDaily(); });
 $("#apply").onclick = () => { const f = $("#from").value, t = $("#to").value; if (!f || !t) return; customRange = f <= t ? { from: f, to: t } : { from: t, to: f }; store.set("customRange", customRange); preset = "custom"; store.set("preset", preset); activeTile = "range"; store.set("activeTile", activeTile); loadDaily(); };
 document.querySelectorAll("#issueFilter button, #prFilter button").forEach((b) => b.onclick = () => { listFilter[b.closest("#issueFilter") ? "issues" : "prs"] = b.dataset.f; store.set("listFilter", listFilter); renderLive(); });
+$("#issueWin").onchange = (e) => { winOnly.issues = e.target.checked; store.set("winOnly", winOnly); renderLive(); };
+$("#prWin").onchange = (e) => { winOnly.prs = e.target.checked; store.set("winOnly", winOnly); renderLive(); };
 $("#refresh").onclick = () => { loadLive(); loadDaily(true); };
 window.addEventListener("resize", () => daily && drawChart(currentRange().from, currentRange().to));
 function renderAll() { renderLive(); renderDaily(); }
