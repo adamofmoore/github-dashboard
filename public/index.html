@@ -94,21 +94,9 @@ section > header .sub { font-size:12.5px; color:var(--muted) }
 .tile .nums { display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:8px }
 .tile .n { display:flex; flex-direction:column; min-width:0 }
 .tile .n b { font-size:22px; font-weight:700; letter-spacing:-.02em; line-height:1.1; white-space:nowrap }
-.tile .n span { font-size:11px; color:var(--muted); line-height:1.3; white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
-.tile .n .avg { font-size:11.5px; color:var(--ink2); font-weight:600; margin-top:3px; white-space:nowrap }
+.tile .n span { font-size:11px; color:var(--muted); line-height:1.3 }
+.tile .n .avg { font-size:11.5px; color:var(--ink2); font-weight:600; margin-top:3px; white-space:nowrap; margin-top:auto; padding-top:3px }
 .tile .n .avg em { font-style:normal; color:var(--muted); font-weight:400 }
-/* B: two rows of two stats, taller narrower tiles */
-body[data-tiles="B"] .tile .nums { grid-template-columns:repeat(2, minmax(0,1fr)); gap:10px 14px }
-body[data-tiles="B"] .tile .n b { font-size:26px }
-/* C: one wide strip; each tile is a row with the label on the left and stats across */
-body[data-tiles="C"] .tiles { grid-template-columns:minmax(0,1fr) }
-body[data-tiles="C"] .tile { flex-direction:row; align-items:center; gap:18px; padding:10px 14px }
-body[data-tiles="C"] .tile .label { flex:0 0 200px; flex-direction:column; align-items:flex-start; gap:2px }
-body[data-tiles="C"] .tile .dates { flex:0 0 260px }
-body[data-tiles="C"] .tile .nums { flex:1; grid-template-columns:repeat(4, minmax(0,1fr)); gap:8px 20px }
-body[data-tiles="C"] .tile .n { flex-direction:row; align-items:baseline; gap:8px; flex-wrap:wrap }
-body[data-tiles="C"] .tile .n .avg { margin:0 }
-@media (max-width:900px) { body[data-tiles="C"] .tile { flex-wrap:wrap } body[data-tiles="C"] .tile .label { flex-basis:100% } body[data-tiles="C"] .tile .nums { grid-template-columns:repeat(2, minmax(0,1fr)) } }
 .chart-wrap { position:relative; background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:14px 14px 8px }
 svg text { fill:var(--muted); font-size:11px }
 .chart-head { display:flex; align-items:center; gap:16px; margin-bottom:8px }
@@ -259,7 +247,6 @@ table { table-layout:fixed } th:first-child, td:first-child { width:auto } td.nu
 
   <section>
     <header><h2>Activity by day</h2><span class="sub">midnight to midnight, local time</span></header>
-    <div class="segs" id="tileLayout" style="margin-bottom:12px"><span style="padding:4px 10px;font-size:12px;color:var(--muted)">Layout preview</span><button data-l="A">A · one row</button><button data-l="B">B · 2×2</button><button data-l="C">C · stacked rows</button></div>
     <div class="tiles" id="tiles"></div>
     <details id="chartDetails"><summary>Show chart</summary>
     <div class="chart-wrap" id="chartWrap"><div class="chart-head"><div class="legend" id="legend"></div><div class="segs" id="chartSize"><button data-h="150">Compact</button><button data-h="280">Regular</button></div></div><svg id="chart" height="280" style="width:100%;display:block"></svg><div class="tip" id="tip"></div></div></details>
@@ -335,10 +322,6 @@ let listFilter = store.get("listFilter", { issues: "open", prs: "all" });
 if (listFilter.issues === "all") listFilter.issues = "open";
 const HIST_DAYS = 30;
 let chartH = store.get("chartH", 280);
-let tileLayout = store.get("tileLayout", "B");
-function renderTileLayout() { document.body.dataset.tiles = tileLayout; document.querySelectorAll("#tileLayout button").forEach((b) => b.setAttribute("aria-pressed", b.dataset.l === tileLayout)); }
-document.querySelectorAll("#tileLayout button").forEach((b) => b.onclick = () => { tileLayout = b.dataset.l; store.set("tileLayout", tileLayout); renderTileLayout(); });
-renderTileLayout();
 $("#chartDetails").open = store.get("chartOpen", false);
 $("#chartDetails").addEventListener("toggle", () => { store.set("chartOpen", $("#chartDetails").open); if ($("#chartDetails").open && daily) drawChart(currentRange().from, currentRange().to); });
 function renderChartSize() { document.querySelectorAll("#chartSize button").forEach((b) => b.setAttribute("aria-pressed", Number(b.dataset.h) === chartH)); $("#chart").setAttribute("height", chartH); }
