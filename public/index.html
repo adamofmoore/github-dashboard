@@ -76,26 +76,39 @@ section > header .sub { font-size:12.5px; color:var(--muted) }
 .toolbar { display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-bottom:16px }
 .toolbar label { font-size:12.5px; color:var(--ink2); display:inline-flex; align-items:center; gap:6px }
 
-.tiles { display:grid; grid-template-columns:repeat(5, minmax(0,1fr)); gap:10px; margin-bottom:22px }
+.tiles { display:grid; grid-template-columns:repeat(5, minmax(0,1fr)); gap:10px; margin-bottom:18px }
 @media (max-width:1500px) { .tiles { grid-template-columns:repeat(3, minmax(0,1fr)) } }
 @media (max-width:1000px) { .tiles { grid-template-columns:repeat(2, minmax(0,1fr)) } }
-@media (max-width:520px) { .tiles { grid-template-columns:minmax(0,1fr) } .tile .nums { grid-template-columns:repeat(2, minmax(0,1fr)) } }
-.tile { min-width:0; text-align:left; border:1px solid var(--border); border-radius:8px; padding:12px 14px; background:var(--surface); cursor:pointer; display:block; width:100%; font:inherit; color:inherit }
+@media (max-width:520px) { .tiles { grid-template-columns:minmax(0,1fr) } }
+.tile { min-width:0; text-align:left; border:1px solid var(--border); border-radius:8px; padding:12px 14px; background:var(--surface); cursor:pointer; display:flex; flex-direction:column; gap:10px; width:100%; font:inherit; color:inherit }
 .tile:focus-visible { outline:2px solid var(--focus); outline-offset:2px }
-.tile:hover { border-color:var(--btn-hover-border); background:var(--surface) }
+.tile:hover { border-color:var(--btn-hover-border) }
 .tile[aria-pressed=true] { border-color:var(--accent); box-shadow:0 0 0 1px var(--accent) inset }
-.tile .label { font-size:13px; color:var(--ink2); margin-bottom:8px; font-weight:500; display:flex; align-items:center; gap:8px; flex-wrap:wrap }
-.tile .dates { display:flex; align-items:center; gap:4px; margin-left:auto; font-size:12px; color:var(--muted) }
-.tile .dates input[type=date] { padding:1px 4px; font-size:12px; border-radius:4px; width:118px; cursor:pointer }
+.tile .label { display:flex; align-items:baseline; justify-content:space-between; gap:8px; font-size:13px; font-weight:600; color:var(--ink) }
+.tile .label em { font-style:normal; font-weight:400; font-size:11.5px; color:var(--muted); white-space:nowrap }
+.tile .dates { display:flex; align-items:center; gap:6px; font-size:11.5px; color:var(--muted) }
+.tile .datelink { position:relative } .tile .datelink a { color:var(--accent-ink); text-decoration:underline; text-decoration-color:transparent; text-underline-offset:2px } .tile .datelink a:hover { text-decoration-color:currentColor }
+.tile .datelink input[type=date] { position:absolute; left:0; top:100%; width:1px; height:1px; opacity:0; pointer-events:none; border:0; padding:0 }
+.tile .dates input[type=date] { flex:1; min-width:0; padding:2px 6px; font-size:12px; border-radius:4px; cursor:pointer }
 .tile .dates input[type=date]:hover { border-color:var(--btn-hover-border) }
-.tile.custom .label em { flex-basis:100%; margin:0 } .tile .label em { font-style:normal; color:var(--muted); font-weight:400; font-size:11.5px }
-.tile .nums { display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:10px 12px }
+.tile .nums { display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:8px }
 .tile .n { display:flex; flex-direction:column; min-width:0 }
-.tile .n b { font-size:20px; font-weight:700; letter-spacing:-.02em; line-height:1.1; white-space:nowrap }
-.tile .n span { font-size:11px; color:var(--muted); line-height:1.2 }
+.tile .n b { font-size:22px; font-weight:700; letter-spacing:-.02em; line-height:1.1; white-space:nowrap }
+.tile .n span { font-size:11px; color:var(--muted); line-height:1.3; white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
 .tile .n .avg { font-size:11.5px; color:var(--ink2); font-weight:600; margin-top:3px; white-space:nowrap }
 .tile .n .avg em { font-style:normal; color:var(--muted); font-weight:400 }
-
+/* B: two rows of two stats, taller narrower tiles */
+body[data-tiles="B"] .tile .nums { grid-template-columns:repeat(2, minmax(0,1fr)); gap:10px 14px }
+body[data-tiles="B"] .tile .n b { font-size:26px }
+/* C: one wide strip; each tile is a row with the label on the left and stats across */
+body[data-tiles="C"] .tiles { grid-template-columns:minmax(0,1fr) }
+body[data-tiles="C"] .tile { flex-direction:row; align-items:center; gap:18px; padding:10px 14px }
+body[data-tiles="C"] .tile .label { flex:0 0 200px; flex-direction:column; align-items:flex-start; gap:2px }
+body[data-tiles="C"] .tile .dates { flex:0 0 260px }
+body[data-tiles="C"] .tile .nums { flex:1; grid-template-columns:repeat(4, minmax(0,1fr)); gap:8px 20px }
+body[data-tiles="C"] .tile .n { flex-direction:row; align-items:baseline; gap:8px; flex-wrap:wrap }
+body[data-tiles="C"] .tile .n .avg { margin:0 }
+@media (max-width:900px) { body[data-tiles="C"] .tile { flex-wrap:wrap } body[data-tiles="C"] .tile .label { flex-basis:100% } body[data-tiles="C"] .tile .nums { grid-template-columns:repeat(2, minmax(0,1fr)) } }
 .chart-wrap { position:relative; background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:14px 14px 8px }
 svg text { fill:var(--muted); font-size:11px }
 .chart-head { display:flex; align-items:center; gap:16px; margin-bottom:8px }
@@ -200,7 +213,7 @@ table { table-layout:fixed } th:first-child, td:first-child { width:auto } td.nu
 @keyframes shimmer { from { transform:translateX(-100%) } to { transform:translateX(100%) } }
 .sk-row { height:38px; margin:8px 12px; border-radius:6px }
 .busy .n b, .busy #legend { color:transparent; background:var(--chip); border-radius:4px; animation:pulse 1.2s ease-in-out infinite }
-.busy .n b .dot, .busy #legend .dot { visibility:hidden }
+.busy #legend .dot { visibility:hidden }
 .busy #chart { opacity:.35 }
 @keyframes pulse { 50% { opacity:.55 } }
 @media (prefers-reduced-motion:reduce) { .sk::after, .busy * , .status.busy::before { animation:none } }
@@ -246,6 +259,7 @@ table { table-layout:fixed } th:first-child, td:first-child { width:auto } td.nu
 
   <section>
     <header><h2>Activity by day</h2><span class="sub">midnight to midnight, local time</span></header>
+    <div class="segs" id="tileLayout" style="margin-bottom:12px"><span style="padding:4px 10px;font-size:12px;color:var(--muted)">Layout preview</span><button data-l="A">A · one row</button><button data-l="B">B · 2×2</button><button data-l="C">C · stacked rows</button></div>
     <div class="tiles" id="tiles"></div>
     <details id="chartDetails"><summary>Show chart</summary>
     <div class="chart-wrap" id="chartWrap"><div class="chart-head"><div class="legend" id="legend"></div><div class="segs" id="chartSize"><button data-h="150">Compact</button><button data-h="280">Regular</button></div></div><svg id="chart" height="280" style="width:100%;display:block"></svg><div class="tip" id="tip"></div></div></details>
@@ -281,10 +295,10 @@ const $ = (s) => document.querySelector(s);
 (function () { let t = "dark"; try { t = JSON.parse(localStorage.getItem("ghdash:theme")) || "dark"; } catch {} document.documentElement.dataset.theme = t;
   document.querySelectorAll("#theme button").forEach((b) => { b.setAttribute("aria-pressed", b.dataset.t === t); b.onclick = () => { document.documentElement.dataset.theme = b.dataset.t; localStorage.setItem("ghdash:theme", JSON.stringify(b.dataset.t)); document.querySelectorAll("#theme button").forEach((x) => x.setAttribute("aria-pressed", x === b)); }; }); })();
 const SERIES = [
-  ["prsMerged", "PRs merged", "var(--s1)", "merged"],
-  ["prsOpened", "PRs opened", "var(--s2)", "opened"],
-  ["issuesOpened", "Issues opened", "var(--s3)", "issues opened"],
-  ["issuesClosed", "Issues closed", "var(--s4)", "issues closed"],
+  ["prsMerged", "PRs merged", "var(--s1)", "PRs merged"],
+  ["prsOpened", "PRs opened", "var(--s2)", "PRs opened"],
+  ["issuesOpened", "Issues opened", "var(--s3)", "Issues opened"],
+  ["issuesClosed", "Issues closed", "var(--s4)", "Issues closed"],
 ];
 const pad = (n) => String(n).padStart(2, "0");
 const dayKey = (d) => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
@@ -305,7 +319,7 @@ let knownRepos = new Set(store.get("knownRepos", []));
 let localRepos = new Map();
 const skRows = (n) => Array.from({ length: n }, () => `<div class="sk sk-row"></div>`).join("");
 function skeletons() {
-  $("#tiles").innerHTML = ["Today","Yesterday","Last 7 days","Last 30 days","Custom"].map((l) => `<div class="tile"><div class="label">${l}</div><div class="nums">${SERIES.map(([, , , short]) => `<div class="n"><b class="sk">00</b><span>${short}</span></div>`).join("")}</div></div>`).join("");
+  $("#tiles").innerHTML = ["Today","Yesterday","Last 7 days","Last 30 days","Custom"].map((l) => `<div class="tile"><div class="label">${l}</div><div class="nums">${SERIES.map(([, , , short]) => `<div class="n"><b class="sk">00</b><span>${short}</span><span class="avg">&nbsp;</span></div>`).join("")}</div></div>`).join("");
   $("#legend").innerHTML = SERIES.map(([, n, c]) => `<span><span class="dot" style="background:${c}"></span>${n}</span>`).join("");
   $("#issueList").innerHTML = skRows(6);
   $("#prList").innerHTML = skRows(5);
@@ -321,6 +335,10 @@ let listFilter = store.get("listFilter", { issues: "open", prs: "all" });
 if (listFilter.issues === "all") listFilter.issues = "open";
 const HIST_DAYS = 30;
 let chartH = store.get("chartH", 280);
+let tileLayout = store.get("tileLayout", "B");
+function renderTileLayout() { document.body.dataset.tiles = tileLayout; document.querySelectorAll("#tileLayout button").forEach((b) => b.setAttribute("aria-pressed", b.dataset.l === tileLayout)); }
+document.querySelectorAll("#tileLayout button").forEach((b) => b.onclick = () => { tileLayout = b.dataset.l; store.set("tileLayout", tileLayout); renderTileLayout(); });
+renderTileLayout();
 $("#chartDetails").open = store.get("chartOpen", false);
 $("#chartDetails").addEventListener("toggle", () => { store.set("chartOpen", $("#chartDetails").open); if ($("#chartDetails").open && daily) drawChart(currentRange().from, currentRange().to); });
 function renderChartSize() { document.querySelectorAll("#chartSize button").forEach((b) => b.setAttribute("aria-pressed", Number(b.dataset.h) === chartH)); $("#chart").setAttribute("height", chartH); }
@@ -453,14 +471,16 @@ function renderDaily() {
   const r = currentRange();
   const windows = [["today","Today"],["yesterday","Yesterday"],["7d","Last 7 days"],["30d","Last 30 days"],["custom","Custom"]];
   $("#tiles").innerHTML = windows.map(([id, label]) => { const [from, to] = windowFor(id); const nDays = daysBetween(from, to).length;
-    const dates = id === "custom" ? `<span class="dates"><input type="date" id="from" value="${from}" max="${today()}" aria-label="From"> – <input type="date" id="to" value="${to}" max="${today()}" aria-label="To"></span>` : "";
+    const dates = "";
+    const customMeta = `<span class="datelink"><a href="#" data-pick="from">${fmtDay(from)}</a> to <a href="#" data-pick="to">${fmtDay(to)}</a><input type="date" id="from" value="${from}" max="${today()}" aria-label="From" tabindex="-1"><input type="date" id="to" value="${to}" max="${today()}" aria-label="To" tabindex="-1"></span>`;
     return `<div class="tile${id === "custom" ? " custom" : ""}" role="button" tabindex="0" data-tile="${id}" aria-pressed="${activeTile === id}">
-    <div class="label"><span>${label}</span>${dates}${nDays > 1 ? `<em>${id === "custom" ? fmtRange(from, to) + " · " : ""}${nDays} days, per-day average below</em>` : (id === "custom" ? `<em>${fmtDay(from)}</em>` : "")}</div>
-    <div class="nums">${SERIES.map(([m, , col, short]) => { const n = countIn(m, from, to); return `<div class="n"><b><span class="dot" style="background:${col}"></span>${n}</b><span>${short}</span>${nDays > 1 ? `<span class="avg">${fmtAvg(n / nDays)}<em>/day</em></span>` : ""}</div>`; }).join("")}</div></div>`; }).join("");
+    <div class="label"><span class="lt">${label}</span><em>${id === "custom" ? customMeta : nDays > 1 ? `${nDays} days` : fmtDay(from)}</em></div>${dates}
+    <div class="nums">${SERIES.map(([m, , col, short]) => { const n = countIn(m, from, to); return `<div class="n"><b>${n}</b><span>${short}</span><span class="avg">${nDays > 1 ? `${fmtAvg(n / nDays)}<em>/day</em>` : "&nbsp;"}</span></div>`; }).join("")}</div></div>`; }).join("");
   const pick = (id) => { if (activeTile === id) return; activeTile = id; store.set("activeTile", activeTile); loadDaily(); };
-  document.querySelectorAll(".tile").forEach((b) => { b.onclick = (e) => { if (e.target.closest(".dates")) return; pick(b.dataset.tile); }; b.onkeydown = (e) => { if ((e.key === "Enter" || e.key === " ") && !e.target.closest(".dates")) { e.preventDefault(); pick(b.dataset.tile); } }; });
+  document.querySelectorAll(".tile").forEach((b) => { b.onclick = (e) => { if (e.target.closest(".dates, .datelink")) return; pick(b.dataset.tile); }; b.onkeydown = (e) => { if ((e.key === "Enter" || e.key === " ") && !e.target.closest(".dates")) { e.preventDefault(); pick(b.dataset.tile); } }; });
   const applyDates = () => { const f = $("#from").value, t = $("#to").value; if (!f || !t) return; customRange = f <= t ? { from: f, to: t } : { from: t, to: f }; store.set("customRange", customRange); activeTile = "custom"; store.set("activeTile", activeTile); loadDaily(); };
   $("#from").onchange = $("#to").onchange = applyDates;
+  document.querySelectorAll(".datelink a").forEach((a) => a.onclick = (e) => { e.preventDefault(); e.stopPropagation(); const inp = $("#" + a.dataset.pick); if (inp.showPicker) inp.showPicker(); else inp.focus(); });
   drawChart(r.from, r.to);
   renderLive();
 }
