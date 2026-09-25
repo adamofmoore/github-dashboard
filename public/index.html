@@ -94,7 +94,8 @@ section > header .sub { font-size:12.5px; color:var(--muted) }
 .tile .nums { display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:16px }
 .tile .n { display:flex; flex-direction:column; min-width:0 }
 .tile .n b { font-size:22px; font-weight:700; letter-spacing:-.02em; line-height:1.1; white-space:nowrap }
-.tile .n span { font-size:12px; color:var(--muted); line-height:1.2; padding:2px 0 4px }
+.tile .n span { font-size:11px; color:var(--muted); line-height:1.2; padding:4px 0 2px }
+.tile .n .avg.up { color:var(--good) } .tile .n .avg.down { color:var(--bad) } .tile .n .avg.flat { color:var(--muted); font-weight:500 }
 .tile .n .avg { font-size:11.5px; color:var(--ink2); font-weight:600; margin-top:3px; white-space:nowrap; margin-top:auto; padding-top:3px }
 .tile .n .avg em { font-style:normal; color:var(--muted); font-weight:400 }
 .chart-wrap { position:relative; background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:14px 14px 8px }
@@ -270,7 +271,7 @@ table { table-layout:fixed } th:first-child, td:first-child { width:auto } td.nu
   </div>
 
   <section id="pickup">
-    <header><h2>Pickup order</h2><span class="count" id="pickupCount">–</span><span class="sub">open issues assigned to me, ranked by how much damage each is doing</span></header>
+    <header><h2>Pickup order</h2><span class="count" id="pickupCount">–</span><span class="sub">Open issues assigned to me, ranked by how much damage each is doing.</span></header>
     <div class="ramp" id="ramp"></div>
     <div class="zonebar" id="zonebar"></div>
     <div id="bands"></div>
@@ -282,10 +283,10 @@ const $ = (s) => document.querySelector(s);
 (function () { let t = "dark"; try { t = JSON.parse(localStorage.getItem("ghdash:theme")) || "dark"; } catch {} document.documentElement.dataset.theme = t;
   document.querySelectorAll("#theme button").forEach((b) => { b.setAttribute("aria-pressed", b.dataset.t === t); b.onclick = () => { document.documentElement.dataset.theme = b.dataset.t; localStorage.setItem("ghdash:theme", JSON.stringify(b.dataset.t)); document.querySelectorAll("#theme button").forEach((x) => x.setAttribute("aria-pressed", x === b)); }; }); })();
 const SERIES = [
-  ["prsMerged", "PRs merged", "var(--s1)", "PRs merged"],
-  ["prsOpened", "PRs opened", "var(--s2)", "PRs opened"],
-  ["issuesOpened", "Issues opened", "var(--s3)", "Issues opened"],
-  ["issuesClosed", "Issues closed", "var(--s4)", "Issues closed"],
+  ["prsMerged", "PRs merged", "var(--s1)", "PRs Merged"],
+  ["prsOpened", "PRs opened", "var(--s2)", "PRs Opened"],
+  ["issuesOpened", "Issues opened", "var(--s3)", "Issues Opened"],
+  ["issuesClosed", "Issues closed", "var(--s4)", "Issues Closed"],
 ];
 const pad = (n) => String(n).padStart(2, "0");
 const dayKey = (d) => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
@@ -458,7 +459,10 @@ function renderDaily() {
     const customMeta = `<span class="datelink"><a href="#" data-pick="from">${fmtDay(from)}</a> to <a href="#" data-pick="to">${fmtDay(to)}</a><input type="date" id="from" value="${from}" max="${today()}" aria-label="From" tabindex="-1"><input type="date" id="to" value="${to}" max="${today()}" aria-label="To" tabindex="-1"></span>`;
     return `<div class="tile${id === "custom" ? " custom" : ""}" role="button" tabindex="0" data-tile="${id}" aria-pressed="${activeTile === id}">
     <div class="label"><span class="lt">${label}</span><em>${id === "custom" ? customMeta : nDays > 1 ? `${nDays} days` : fmtDay(from)}</em></div>${dates}
-    <div class="nums">${SERIES.map(([m, , col, short]) => { const n = countIn(m, from, to); return `<div class="n"><b>${n}</b><span>${short}</span><span class="avg">${nDays > 1 ? `${fmtAvg(n / nDays)}<em>/day</em>` : "&nbsp;"}</span></div>`; }).join("")}</div></div>`; }).join("");
+    <div class="nums">${SERIES.map(([m, , col, short]) => { const n = countIn(m, from, to); let tail = "&nbsp;", cls = "";
+      if (nDays > 1) tail = `${fmtAvg(n / nDays)}<em>/day</em>`;
+      else { const prev = countIn(m, shift(from, -1), shift(from, -1)), d = n - prev; cls = d > 0 ? "up" : d < 0 ? "down" : "flat"; tail = `${d > 0 ? "+" : d < 0 ? "−" : "±"}${Math.abs(d)}`; }
+      return `<div class="n"><b>${n}</b><span>${short}</span><span class="avg ${cls}">${tail}</span></div>`; }).join("")}</div></div>`; }).join("");
   const pick = (id) => { if (activeTile === id) return; activeTile = id; store.set("activeTile", activeTile); loadDaily(); };
   document.querySelectorAll(".tile").forEach((b) => { b.onclick = (e) => { if (e.target.closest(".dates, .datelink")) return; pick(b.dataset.tile); }; b.onkeydown = (e) => { if ((e.key === "Enter" || e.key === " ") && !e.target.closest(".dates")) { e.preventDefault(); pick(b.dataset.tile); } }; });
   const applyDates = () => { const f = $("#from").value, t = $("#to").value; if (!f || !t) return; customRange = f <= t ? { from: f, to: t } : { from: t, to: f }; store.set("customRange", customRange); activeTile = "custom"; store.set("activeTile", activeTile); loadDaily(); };
