@@ -461,7 +461,7 @@ function renderDaily() {
     <div class="label"><span class="lt">${label}</span><em>${id === "custom" ? customMeta : nDays > 1 ? `${nDays} days` : fmtDay(from)}</em></div>${dates}
     <div class="nums">${SERIES.map(([m, , col, short]) => { const n = countIn(m, from, to); let tail = "&nbsp;", cls = "";
       if (nDays > 1) tail = `${fmtAvg(n / nDays)}<em>/day</em>`;
-      else { const prev = countIn(m, shift(from, -1), shift(from, -1)), d = n - prev; cls = d > 0 ? "up" : d < 0 ? "down" : "flat"; tail = `${d > 0 ? "+" : d < 0 ? "−" : "±"}${Math.abs(d)}<em> v. yday</em>`; }
+      else { const prev = countIn(m, shift(from, -1), shift(from, -1)), d = n - prev; cls = d > 0 ? "up" : d < 0 ? "down" : "flat"; tail = `${d > 0 ? "+" : d < 0 ? "−" : "±"}${Math.abs(d)}<em> yday</em>`; }
       return `<div class="n"><b>${n}</b><span>${short}</span><span class="avg ${cls}">${tail}</span></div>`; }).join("")}</div></div>`; }).join("");
   const pick = (id) => { if (activeTile === id) return; activeTile = id; store.set("activeTile", activeTile); loadDaily(); };
   document.querySelectorAll(".tile").forEach((b) => { b.onclick = (e) => { if (e.target.closest(".dates, .datelink")) return; pick(b.dataset.tile); }; b.onkeydown = (e) => { if ((e.key === "Enter" || e.key === " ") && !e.target.closest(".dates")) { e.preventDefault(); pick(b.dataset.tile); } }; });
