@@ -6,6 +6,7 @@ on:
   workflow_dispatch:
 permissions:
   contents: write
+  pull-requests: write
 jobs:
   screenshot:
     runs-on: ubuntu-latest
@@ -16,11 +17,20 @@ jobs:
           node-version: 22
       - run: npm i --no-save playwright && npx playwright install --with-deps chromium
       - run: node scripts/screenshot.mjs
-      - name: Commit if changed
+      - name: Open a PR if the screenshot changed
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add docs/screenshot.png
           git diff --cached --quiet && echo "screenshot unchanged" && exit 0
+          branch="bot/readme-screenshot"
+          git checkout -B "$branch"
           git commit -m "Update README screenshot"
-          git push
+          git push -f origin "$branch"
+          if gh pr view "$branch" --json number >/dev/null 2>&1; then
+            echo "PR already open for $branch, updated"
+          else
+            gh pr create --base main --head "$branch" --title "Update README screenshot" --body "Regenerated from DEMO=1 after a UI change on main. Merge when it looks right."
+          fi
