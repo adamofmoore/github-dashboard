@@ -9,7 +9,7 @@ try {
     try { await fetch(`http://127.0.0.1:${PORT}/api/me`); break; } catch { await new Promise((r) => setTimeout(r, 200)); }
   }
   const browser = await chromium.launch();
-  const page = await browser.newPage({ viewport: { width: 1600, height: 1000 }, deviceScaleFactor: 1 });
+  const page = await browser.newPage({ viewport: { width: 1600, height: 1000 }, deviceScaleFactor: 1, timezoneId: "America/Los_Angeles" });
   await page.goto(`http://127.0.0.1:${PORT}`);
   await page.evaluate(() => { localStorage.setItem("ghdash:theme", '"dark"'); localStorage.setItem("ghdash:preset", '"7d"'); localStorage.setItem("ghdash:activeTile", '"7d"'); localStorage.setItem("ghdash:chartH", "150"); });
   await page.reload();
