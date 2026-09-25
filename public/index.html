@@ -249,7 +249,8 @@ table { table-layout:fixed } th:first-child, td:first-child { width:auto } td.nu
   </div>
 
   <section>
-    <header><h2>Activity by day</h2><span class="sub">midnight to midnight, local time</span></header>
+    <header><h2>Activity by day</h2><span class="sub">midnight to midnight, local time</span>
+      <label class="win-only" title="Per-day averages count Monday to Thursday only"><input type="checkbox" id="workWeek"> Normalize for work week</label></header>
     <div class="tiles" id="tiles"></div>
     <details id="chartDetails"><summary>Show chart</summary>
     <div class="chart-wrap" id="chartWrap"><div class="chart-head"><div class="legend" id="legend"></div><div class="segs" id="chartSize"><button data-h="150">Compact</button><button data-h="280">Regular</button></div></div><svg id="chart" height="280" style="width:100%;display:block"></svg><div class="tip" id="tip"></div></div></details>
@@ -321,6 +322,8 @@ let customRange = store.get("customRange", { from: shift(today(), -6), to: today
 let activeTile = store.get("activeTile", "7d");
 if (activeTile === "range") activeTile = "custom";
 let winOnly = store.get("winOnly", { issues: false, prs: false });
+let workWeek = store.get("workWeek", false);
+const isWorkDay = (k) => { const [y,m,d] = k.split("-").map(Number); const dow = new Date(y, m-1, d).getDay(); return dow >= 1 && dow <= 4; };
 let listFilter = store.get("listFilter", { issues: "open", prs: "all" });
 if (listFilter.issues === "all") listFilter.issues = "open";
 const HIST_DAYS = 30;
@@ -456,13 +459,14 @@ function renderDaily() {
   if (!daily) return;
   const r = currentRange();
   const windows = [["today","Today"],["yesterday","Yesterday"],["7d","Last 7 days"],["30d","Last 30 days"],["custom","Custom"]];
-  $("#tiles").innerHTML = windows.map(([id, label]) => { const [from, to] = windowFor(id); const nDays = daysBetween(from, to).length;
+  $("#workWeek").checked = workWeek;
+  $("#tiles").innerHTML = windows.map(([id, label]) => { const [from, to] = windowFor(id); const days = daysBetween(from, to), nDays = days.length, divDays = workWeek ? days.filter(isWorkDay).length : nDays;
     const dates = "";
     const customMeta = `<span class="datelink"><a href="#" data-pick="from">${fmtDay(from)}</a> to <a href="#" data-pick="to">${fmtDay(to)}</a><input type="date" id="from" value="${from}" max="${today()}" aria-label="From" tabindex="-1"><input type="date" id="to" value="${to}" max="${today()}" aria-label="To" tabindex="-1"></span>`;
     return `<div class="tile${id === "custom" ? " custom" : ""}" role="button" tabindex="0" data-tile="${id}" aria-pressed="${activeTile === id}">
-    <div class="label"><span class="lt">${label}</span><em>${id === "custom" ? customMeta : nDays > 1 ? `${nDays} days` : fmtDay(from)}</em></div>${dates}
+    <div class="label"><span class="lt">${label}</span><em>${id === "custom" ? customMeta : nDays > 1 ? (workWeek ? `${divDays} work days` : `${nDays} days`) : fmtDay(from)}</em></div>${dates}
     <div class="nums">${SERIES.map(([m, , col, short]) => { const n = countIn(m, from, to); let tail = "&nbsp;", cls = "";
-      if (nDays > 1) tail = `${fmtAvg(n / nDays)}<em>/day</em>`;
+      if (nDays > 1) tail = divDays ? `${fmtAvg(n / divDays)}<em>/day</em>` : `<em>no work days</em>`;
       else { const prev = countIn(m, shift(from, -1), shift(from, -1)), d = n - prev; cls = d > 0 ? "up" : d < 0 ? "down" : "flat"; tail = `${d > 0 ? "+" : d < 0 ? "−" : "±"}${Math.abs(d)}<em> yday</em>`; }
       return `<div class="n"><b>${n}</b><span>${short}</span><span class="avg ${cls}">${tail}</span></div>`; }).join("")}</div></div>`; }).join("");
   const pick = (id) => { if (activeTile === id) return; activeTile = id; store.set("activeTile", activeTile); loadDaily(); };
@@ -512,6 +516,7 @@ function drawChart(from, to) {
 document.querySelectorAll("#issueFilter button, #prFilter button").forEach((b) => b.onclick = () => { listFilter[b.closest("#issueFilter") ? "issues" : "prs"] = b.dataset.f; store.set("listFilter", listFilter); renderLive(); });
 $("#issueWin").onchange = (e) => { winOnly.issues = e.target.checked; store.set("winOnly", winOnly); renderLive(); };
 $("#prWin").onchange = (e) => { winOnly.prs = e.target.checked; store.set("winOnly", winOnly); renderLive(); };
+$("#workWeek").onchange = (e) => { workWeek = e.target.checked; store.set("workWeek", workWeek); renderDaily(); };
 $("#refresh").onclick = () => { loadLive(); loadDaily(true); };
 window.addEventListener("resize", () => daily && drawChart(currentRange().from, currentRange().to));
 function renderAll() { renderLive(); renderDaily(); }
