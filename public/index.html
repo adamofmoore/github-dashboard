@@ -266,7 +266,7 @@ table { table-layout:fixed } th:first-child, td:first-child { width:auto } td.nu
         <label class="win-only"><input type="checkbox" id="issueWin"> Only selected window</label></header>
       <div class="segs list-filter" id="issueFilter"><button data-f="open">Open</button><button data-f="inflight">In flight</button><button data-f="closed">Closed</button></div>
       <div id="issueList" class="scroll"></div>
-      <p class="ghlink"><a id="issueGh" href="https://github.com/issues" target="_blank" rel="noopener">Open assigned issues on GitHub</a></p>
+      <p class="ghlink"><a id="issueGh" href="https://github.com/issues/assigned" target="_blank" rel="noopener">Open assigned issues on GitHub</a></p>
     </section>
     <section id="prs">
       <header><h2>My pull requests</h2><span id="prCount" hidden>–</span><span class="sub" id="prSub"></span>
@@ -275,7 +275,7 @@ table { table-layout:fixed } th:first-child, td:first-child { width:auto } td.nu
       <div id="prList" class="scroll"></div>
       <p class="ghlink"><a id="prGh" href="https://github.com/pulls" target="_blank" rel="noopener">Open my pull requests on GitHub</a></p>
       <details><summary id="rrSummary">Waiting on my review</summary><div id="rrList"></div>
-        <p class="ghlink"><a id="rrGh" href="https://github.com/pulls" target="_blank" rel="noopener">Open review requests on GitHub</a></p></details>
+        <p class="ghlink"><a id="rrGh" href="https://github.com/pulls/review-requested" target="_blank" rel="noopener">Open review requests on GitHub</a></p></details>
     </section>
   </div>
 
@@ -380,7 +380,7 @@ function fetchRange() {
 }
 async function loadLive(button) {
   if (button) { button.disabled = true; button.textContent = "Refreshing…"; }
-  try { live = await api("/api/live"); $("#who").textContent = live.user; setGhLinks(live.user);
+  try { live = await api("/api/live"); $("#who").textContent = live.user;
     noteRepos([...live.issues, ...live.prs, ...live.reviewRequests].map((i) => i.repo)); renderLive(); }
   catch (e) { setStatus("Live lists failed: " + e.message, true); }
   finally { if (button) { button.disabled = false; button.textContent = "Refresh list"; } }
@@ -394,12 +394,6 @@ async function loadDaily(force) {
   catch (e) { setStatus("Activity failed: " + e.message, true); }
 }
 
-const ghSearch = (q) => `https://github.com/search?type=issues&q=${encodeURIComponent(q)}`;
-function setGhLinks(user) {
-  $("#issueGh").href = ghSearch(`assignee:${user} is:issue is:open sort:updated-desc`);
-  $("#prGh").href = ghSearch(`author:${user} is:pr is:open sort:updated-desc`);
-  $("#rrGh").href = ghSearch(`review-requested:${user} is:pr is:open sort:updated-desc`);
-}
 function inflightIssue(i) { return i.linkedPrs.length > 0; }
 function prPhase(p) {
   if (p.draft) return ["Draft", "pill"];
