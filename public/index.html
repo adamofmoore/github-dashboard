@@ -308,6 +308,7 @@ const fmtAvg = (v) => v >= 100 ? Math.round(v).toString() : v >= 10 ? v.toFixed(
 const fmtRange = (a, b) => a === b ? fmtDay(a) : `${fmtDay(a)} to ${fmtDay(b)}`;
 const ago = (iso) => { const s = Math.max(0, (Date.now()-new Date(iso))/1000); if (s<3600) return `${Math.round(s/60)}m`; if (s<86400) return `${Math.round(s/3600)}h`; return `${Math.round(s/86400)}d`; };
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const tt = (s) => (s ? ` title="${esc(s)}"` : "");
 
 const store = {
   get: (k, d) => { try { const v = JSON.parse(localStorage.getItem("ghdash:"+k)); return v ?? d; } catch { return d; } },
@@ -424,8 +425,8 @@ function renderLive() {
   document.querySelectorAll("#issueFilter button").forEach((b) => { b.setAttribute("aria-pressed", b.dataset.f === listFilter.issues); b.textContent = `${{open:"Open",inflight:"In flight",closed:"Closed"}[b.dataset.f]} ${issueSets[b.dataset.f].length}`; });
   const issues = issueSets[listFilter.issues];
   $("#issueList").innerHTML = issues.length ? `<table><thead><tr><th>Issue</th><th>Progress</th><th class="num">${listFilter.issues === "closed" ? "Closed" : "Updated"}</th></tr></thead><tbody>` +
-    issues.map((i) => `<tr><td><div class="item"><span class="repo">${esc(i.repo)} #${i.number}</span><a class="title" href="${i.url}" target="_blank">${esc(i.title)}</a></div></td>
-      <td>${i.state === "closed" ? `<span class="pill">${i.state_reason === "not_planned" ? "Not planned" : "Closed"}</span>` : inflightIssue(i) ? i.linkedPrs.map((p) => `<a class="pill flight" href="${p.url}" target="_blank">PR #${p.number}${p.draft ? " draft" : ""}</a>`).join("") : `<span class="pill">Not started</span>`}${(i.labels || []).map((l) => `<span class="pill">${esc(l.name)}</span>`).join("")}</td>
+    issues.map((i) => `<tr><td><div class="item"><span class="repo">${esc(i.repo)} #${i.number}</span><a class="title" href="${i.url}"${tt(i.title)} target="_blank">${esc(i.title)}</a></div></td>
+      <td>${i.state === "closed" ? `<span class="pill">${i.state_reason === "not_planned" ? "Not planned" : "Closed"}</span>` : inflightIssue(i) ? i.linkedPrs.map((p) => `<a class="pill flight" href="${p.url}"${tt(p.title)} target="_blank">PR #${p.number}${p.draft ? " draft" : ""}</a>`).join("") : `<span class="pill">Not started</span>`}${(i.labels || []).map((l) => `<span class="pill">${esc(l.name)}</span>`).join("")}</td>
       <td class="num when">${ago(i.closed_at && i.state === "closed" ? i.closed_at : i.updated_at || i.created_at)}</td></tr>`).join("") + "</tbody></table>" : `<div class="empty">Nothing here in the selected repos.</div>`;
 
   const openPrs = live.prs.filter((p) => visible(p.repo) && (!winOnly.prs || inWindow(p.updated_at, win))).sort((a,b) => b.updated_at.localeCompare(a.updated_at));
@@ -448,10 +449,10 @@ function renderLive() {
 function prTable(prs) {
   return `<table><thead><tr><th>Pull request</th><th>Status</th><th class="num lines">Lines</th><th class="num">Updated</th></tr></thead><tbody>` +
     prs.map((p) => {
-      if (p.merged_at) return `<tr><td><div class="item"><span class="repo">${esc(p.repo)} #${p.number}</span><a class="title" href="${p.url}" target="_blank">${esc(p.title)}</a></div></td><td><span class="pill good">Merged</span></td><td class="num when lines"></td><td class="num when">${ago(p.merged_at)}</td></tr>`;
+      if (p.merged_at) return `<tr><td><div class="item"><span class="repo">${esc(p.repo)} #${p.number}</span><a class="title" href="${p.url}"${tt(p.title)} target="_blank">${esc(p.title)}</a></div></td><td><span class="pill good">Merged</span></td><td class="num when lines"></td><td class="num when">${ago(p.merged_at)}</td></tr>`;
       const [t, c] = prPhase(p);
-      return `<tr><td><div class="item"><span class="repo">${esc(p.repo)} #${p.number} — ${esc(p.head)}</span><a class="title" href="${p.url}" target="_blank">${esc(p.title)}</a></div></td>
-      <td><span class="${c}">${t}</span>${p.mergeable === "CONFLICTING" ? `<span class="pill bad">Conflicts</span>` : ""}${p.closes.map((i) => `<a class="pill" href="${i.url}" target="_blank">Closes #${i.number}</a>`).join("")}${p.reviewers.map((r) => `<span class="pill">${esc(r)}</span>`).join("")}</td>
+      return `<tr><td><div class="item"><span class="repo">${esc(p.repo)} #${p.number} — ${esc(p.head)}</span><a class="title" href="${p.url}"${tt(p.title)} target="_blank">${esc(p.title)}</a></div></td>
+      <td><span class="${c}">${t}</span>${p.mergeable === "CONFLICTING" ? `<span class="pill bad">Conflicts</span>` : ""}${p.closes.map((i) => `<a class="pill" href="${i.url}"${tt(i.title)} target="_blank">Closes #${i.number}</a>`).join("")}${p.reviewers.map((r) => `<span class="pill">${esc(r)}</span>`).join("")}</td>
       <td class="num when lines">+${p.additions} −${p.deletions}</td><td class="num when">${ago(p.updated_at)}</td></tr>`; }).join("") + "</tbody></table>";
 }
 function countIn(metric, from, to) {
@@ -551,7 +552,7 @@ function renderPickup() {
     if (zoneFilter !== null && zoneFilter !== z) return "";
     if (z === 0 && rows.length === 0 && zoneFilter === null) return "";
     return `<section class="band${z === 0 ? " priority" : ""}" style="--zc:${zn.color}"><header class="band-head"><span class="zone">${z === 0 ? "!" : zn.z}</span><h3>${zn.name}</h3><span class="band-count"><b>${rows.length}</b> ${rows.length === 1 ? "issue" : "issues"}</span><p class="band-blurb">${zn.blurb}</p></header><ol>` +
-      rows.map((i, k) => `<li><span class="stripe"></span><span class="rank">${start + k + 1}</span><div class="cell"><a class="title" href="${i.url}" target="_blank">${esc(i.title)}</a>${i.why ? `<p class="why">${esc(i.why)}</p>` : ""}<div class="meta"><span class="pill repo">${esc(i.repo.split("/")[1])}<b>#${i.number}</b></span>${i.linkedPrs.map((p) => `<a class="pill flight" href="${p.url}" target="_blank">PR #${p.number}${p.draft ? " draft" : ""}</a>`).join("")}${i.labels.map((l) => `<span class="pill">${esc(l.name)}</span>`).join("")}<span class="pill">${ageDays(i.created_at)}d open</span>${i.comments ? `<span class="pill">${i.comments} comment${i.comments === 1 ? "" : "s"}</span>` : ""}</div></div></li>`).join("") + `</ol></section>`;
+      rows.map((i, k) => `<li><span class="stripe"></span><span class="rank">${start + k + 1}</span><div class="cell"><a class="title" href="${i.url}"${tt(i.title)} target="_blank">${esc(i.title)}</a>${i.why ? `<p class="why">${esc(i.why)}</p>` : ""}<div class="meta"><span class="pill repo">${esc(i.repo.split("/")[1])}<b>#${i.number}</b></span>${i.linkedPrs.map((p) => `<a class="pill flight" href="${p.url}"${tt(p.title)} target="_blank">PR #${p.number}${p.draft ? " draft" : ""}</a>`).join("")}${i.labels.map((l) => `<span class="pill">${esc(l.name)}</span>`).join("")}<span class="pill">${ageDays(i.created_at)}d open</span>${i.comments ? `<span class="pill">${i.comments} comment${i.comments === 1 ? "" : "s"}</span>` : ""}</div></div></li>`).join("") + `</ol></section>`;
   }).join("");
 }
 
