@@ -33,6 +33,7 @@ Only the owner session (localhost with `gh`) sees the "Cloned on this Mac" repo 
 - My open PRs: `author:me is:pr is:open`. In review = not draft.
 - Issues opened: created by me that day. Issues closed: assigned to me, closed that day.
 - PRs opened / merged: authored by me.
+- Pickup order: every open assigned issue gets a zone from its labels, then its title, then its first body line (`public/triage.js`). A high-priority label wins outright; otherwise tracking/feature framing, explicit decisions, critical, broken instruments, accessibility, cleanup, with correctness debt as the default. The list refetches every 2 minutes; **Refresh list** pulls it now. `node --test test/triage.test.js` pins the rules.
 - Days are local midnight to midnight (server timezone).
 
 ## Configuration (`.env` next to `start.sh`, all optional)

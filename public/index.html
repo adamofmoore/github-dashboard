@@ -155,9 +155,10 @@ table { table-layout:fixed } th:first-child, td:first-child { width:auto } td.nu
 #repoPanel .actions { display:flex; gap:8px; margin-bottom:6px }
 
 /* pickup order */
-:root { --zp:#d2a8ff; --z6:#f0616a; --z5:#eb9245; --z4:#cfae3a; --z3:#4cba85; --z2:#6a9fe0; }
-:root[data-theme="light"] { --zp:#8250df; --z6:#c8262f; --z5:#cf6a12; --z4:#9a7a10; --z3:#1f7d52; --z2:#2c63a8; }
+:root { --zp:#d2a8ff; --z6:#f0616a; --z5:#eb9245; --z4:#cfae3a; --z3:#4cba85; --z2:#6a9fe0; --z1:#9aa4b2; }
+:root[data-theme="light"] { --zp:#8250df; --z6:#c8262f; --z5:#cf6a12; --z4:#9a7a10; --z3:#1f7d52; --z2:#2c63a8; --z1:#5f6b7a; }
 .band.priority ol { border-color:var(--zc); box-shadow:0 0 0 1px var(--zc) inset }
+#pickup > header .spacer { flex:1 } #pickup > header button { flex:none }
 #pickup .ramp { display:flex; gap:3px; height:6px; border-radius:99px; overflow:hidden; margin:0 0 18px }
 #pickup .ramp i { display:block; border-radius:2px; min-width:3px }
 #pickup .zonebar { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:18px }
@@ -274,13 +275,14 @@ table { table-layout:fixed } th:first-child, td:first-child { width:auto } td.nu
   </div>
 
   <section id="pickup">
-    <header><h2>Pickup order</h2><span class="count" id="pickupCount">–</span><span class="sub">Open issues assigned to me, ranked by how much damage each is doing.</span></header>
+    <header><h2>Pickup order</h2><span class="count" id="pickupCount">–</span><span class="sub">Open issues assigned to me, ranked by how much damage each is doing.</span><span class="spacer"></span><span class="sub" id="pickupStamp"></span><button id="pickupRefresh">Refresh list</button></header>
     <div class="ramp" id="ramp"></div>
     <div class="zonebar" id="zonebar"></div>
     <div id="bands"></div>
   </section>
 </div>
 
+<script src="/triage.js"></script>
 <script>
 const $ = (s) => document.querySelector(s);
 (function () { let t = "dark"; try { t = JSON.parse(localStorage.getItem("ghdash:theme")) || "dark"; } catch {} document.documentElement.dataset.theme = t;
@@ -371,10 +373,12 @@ function fetchRange() {
   const r = currentRange(); const t = today();
   return { from: r.from < shift(t,-29) ? r.from : shift(t,-29), to: r.to > t ? r.to : t };
 }
-async function loadLive() {
+async function loadLive(button) {
+  if (button) { button.disabled = true; button.textContent = "Refreshing…"; }
   try { live = await api("/api/live"); $("#who").textContent = live.user;
     noteRepos([...live.issues, ...live.prs, ...live.reviewRequests].map((i) => i.repo)); renderLive(); }
   catch (e) { setStatus("Live lists failed: " + e.message, true); }
+  finally { if (button) { button.disabled = false; button.textContent = "Refresh list"; } }
 }
 async function loadDaily(force) {
   const { from, to } = fetchRange();
@@ -519,32 +523,12 @@ $("#issueWin").onchange = (e) => { winOnly.issues = e.target.checked; store.set(
 $("#prWin").onchange = (e) => { winOnly.prs = e.target.checked; store.set("winOnly", winOnly); renderLive(); };
 $("#workWeek").onchange = (e) => { workWeek = e.target.checked; store.set("workWeek", workWeek); renderDaily(); };
 $("#refresh").onclick = () => { loadLive(); loadDaily(true); };
+$("#pickupRefresh").onclick = () => loadLive($("#pickupRefresh"));
 window.addEventListener("resize", () => daily && drawChart(currentRange().from, currentRange().to));
 function renderAll() { renderLive(); renderDaily(); }
 
 // ---------- pickup order ----------
-const ZONES = [
-  { z: "P", name: "Flagged high priority", color: "var(--zp)", blurb: "Labelled high priority on GitHub. Sits above everything else until the label comes off." },
-  { z: "Z6", name: "Critical", color: "var(--z6)", blurb: "A user hits it, or the whole team is blocked. These come off the pile first." },
-  { z: "Z5", name: "Broken instruments", color: "var(--z5)", blurb: "Gates, tests and tools that report the wrong thing. Every hour they stay red costs trust in every other result." },
-  { z: "Z4", name: "Correctness debt", color: "var(--z4)", blurb: "Real defects with a bounded blast radius. The bulk of the pile, and where steady progress shows." },
-  { z: "Z3", name: "Accessibility", color: "var(--z3)", blurb: "Keyboard, focus and screen-reader work, plus the primitives underneath them." },
-  { z: "Z2", name: "Decisions and cleanup", color: "var(--z2)", blurb: "Policy calls, sequencing waits and dead code. Cheap to close, or not yours to decide alone." },
-];
-const PRIORITY_LABELS = ["high priority", "high-priority", "priority: high", "priority/high", "p0", "p1", "urgent", "blocker"];
-const RULES = [
-  [/\b(crash|data loss|outage|prod(uction)? (down|broken)|blocks? (the )?(team|release)|security|cannot (log ?in|sign ?in)|critical|sev ?1)\b/i, ["critical", "sev1"], 1],
-  [/\b(flaky|flake|false (green|red|pass|negative)|lane|ci|teamcity|burn-?in|gate|instrument|cannot see|reports? (green|the wrong)|test(s)? (fail|pass)|reds? clean)\b/i, ["flaky", "ci", "test-infra", "infra"], 2],
-  [/\b(a11y|accessib|keyboard|focus|screen ?reader|aria|contrast|tab order)\b/i, ["a11y", "accessibility"], 4],
-  [/\b(decide|decision|policy|should we|cleanup|clean up|dead code|remove|rename|docs?|documentation|follow-?ups?|chore|tidy|deprecat|question)\b/i, ["question", "decision", "cleanup", "chore", "docs", "documentation", "p3", "low priority", "nice to have"], 5],
-];
-function zoneFor(i) {
-  const labels = i.labels.map((l) => l.name.toLowerCase());
-  if (labels.some((l) => PRIORITY_LABELS.includes(l))) return 0;
-  const text = `${i.title} ${i.why || ""}`;
-  for (const [re, labs, z] of RULES) if (labs.some((l) => labels.includes(l)) || re.test(i.title) || (z !== 5 && re.test(text))) return z;
-  return 3;
-}
+const { ZONES, zoneFor } = Triage;
 function ageDays(iso) { return Math.max(0, Math.round((Date.now() - new Date(iso)) / 86400000)); }
 let zoneFilter = store.get("zoneFilter", null);
 function renderPickup() {
@@ -552,6 +536,7 @@ function renderPickup() {
   const issues = live.issues.filter((i) => visible(i.repo)).map((i) => ({ ...i, zone: zoneFor(i) }));
   const inZone = ZONES.map((_, z) => issues.filter((i) => i.zone === z).sort((a, b) => (b.linkedPrs.length - a.linkedPrs.length) || (b.comments - a.comments) || a.created_at.localeCompare(b.created_at)));
   $("#pickupCount").textContent = issues.length;
+  $("#pickupStamp").textContent = `Fetched ${ago(live.fetchedAt)} ago`;
   $("#ramp").innerHTML = ZONES.map((zn, z) => `<i style="flex:${inZone[z].length || 0}; background:${zn.color}" title="${zn.z} ${zn.name}: ${inZone[z].length}"></i>`).join("");
   $("#zonebar").innerHTML = ZONES.map((zn, z) => (z === 0 && !inZone[0].length) ? "" : `<button data-z="${z}" aria-pressed="${zoneFilter === z}" style="--zc:${zn.color}"><i></i>${z === 0 ? "" : zn.z + " · "}${zn.name} <b>${inZone[z].length}</b></button>`).join("");
   document.querySelectorAll("#zonebar button").forEach((b) => b.onclick = () => { zoneFilter = zoneFilter === Number(b.dataset.z) ? null : Number(b.dataset.z); store.set("zoneFilter", zoneFilter); renderPickup(); });
