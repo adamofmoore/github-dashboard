@@ -307,8 +307,8 @@ const daysBetween = (a, b) => { const out = []; for (let d = a; d <= b; d = shif
 const fmtAvg = (v) => v >= 100 ? Math.round(v).toString() : v >= 10 ? v.toFixed(1) : v.toFixed(2).replace(/\.?0+$/, "");
 const fmtRange = (a, b) => a === b ? fmtDay(a) : `${fmtDay(a)} to ${fmtDay(b)}`;
 const ago = (iso) => { const s = Math.max(0, (Date.now()-new Date(iso))/1000); if (s<3600) return `${Math.round(s/60)}m`; if (s<86400) return `${Math.round(s/3600)}h`; return `${Math.round(s/86400)}d`; };
-const tt = (s) => (s ? ` title="${esc(s)}"` : "");
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const tt = (s) => (s ? ` title="${esc(s)}"` : "");
 
 const store = {
   get: (k, d) => { try { const v = JSON.parse(localStorage.getItem("ghdash:"+k)); return v ?? d; } catch { return d; } },
