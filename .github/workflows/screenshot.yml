@@ -29,7 +29,8 @@ jobs:
           git checkout -B "$branch"
           git commit -m "Update README screenshot"
           git push -f origin "$branch"
-          if gh pr view "$branch" --json number >/dev/null 2>&1; then
+          # gh pr view also matches merged/closed PRs, so count open ones only
+          if [ "$(gh pr list --head "$branch" --state open --json number --jq length)" -gt 0 ]; then
             echo "PR already open for $branch, updated"
           else
             gh pr create --base main --head "$branch" --title "Update README screenshot" --body "Regenerated from DEMO=1 after a UI change on main. Merge when it looks right."
