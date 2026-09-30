@@ -78,6 +78,19 @@ section > header .sub { font-size:12.5px; color:var(--muted) }
 .toolbar { display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-bottom:16px }
 .toolbar label { font-size:12.5px; color:var(--ink2); display:inline-flex; align-items:center; gap:6px }
 
+#quota { padding-bottom:0 } #quota[hidden] { display:none }
+.qgrid { display:grid; grid-template-columns:repeat(auto-fill, minmax(300px, 1fr)); gap:10px }
+.qcard { border:1px solid var(--border); border-radius:8px; padding:12px 14px; background:var(--surface); display:grid; gap:9px; min-width:0 }
+.qcard .who { display:flex; align-items:baseline; gap:8px; font-weight:600; font-size:13px; min-width:0 } .qcard .who .email { overflow:hidden; text-overflow:ellipsis; white-space:nowrap } .qcard .who .used { margin-left:auto; font-weight:500; font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em }
+.qcard .who .id { white-space:nowrap; font-weight:400; font-size:11px; color:var(--muted); font-family:ui-monospace,SFMono-Regular,Menlo,monospace }
+.qcard.spent { border-color:var(--bad) }
+.qrow { display:grid; grid-template-columns:72px 1fr 44px; align-items:center; gap:10px; font-size:12px }
+.qrow .qn { color:var(--ink2); font-weight:500 } .qrow .qv { text-align:right; font-weight:700; font-variant-numeric:tabular-nums }
+.qrow .qbar { height:6px; border-radius:3px; background:var(--grid); overflow:hidden } .qrow .qbar i { display:block; height:100% ; border-radius:3px; background:var(--accent) }
+.qrow.warn .qbar i { background:var(--warn) } .qrow.bad .qbar i { background:var(--bad) } .qrow.bad .qv { color:var(--bad) } .qrow.warn .qv { color:var(--warn) }
+.qrow .qreset { grid-column:2 / span 2; margin-top:-5px; font-size:11px; color:var(--muted); display:flex; justify-content:space-between; gap:8px } .qrow .qreset b { font-weight:600; color:var(--ink2) }
+.qrow.bad .qreset b { color:var(--bad) }
+.qnote { font-size:12px; color:var(--muted) } .qnote b { color:var(--ink) }
 .tiles { display:grid; grid-template-columns:repeat(5, minmax(0,1fr)); gap:10px; margin-bottom:18px }
 @media (max-width:1500px) { .tiles { grid-template-columns:repeat(3, minmax(0,1fr)) } }
 @media (max-width:1000px) { .tiles { grid-template-columns:repeat(2, minmax(0,1fr)) } }
@@ -251,6 +264,11 @@ table { table-layout:fixed } th:first-child, td:first-child { width:auto } td.nu
     <button id="signout" style="display:none">Sign out</button>
   </div>
 
+  <section id="quota" hidden>
+    <header><h2>AI quotas</h2><span class="sub" id="quotaSub"></span></header>
+    <div class="qgrid" id="quotaGrid"></div>
+  </section>
+
   <section>
     <header><h2>Activity by day</h2><span class="sub">midnight to midnight, local time</span>
       <label class="win-only" title="Per-day averages count Monday to Thursday only"><input type="checkbox" id="workWeek"> Normalize for work week</label></header>
@@ -363,7 +381,38 @@ async function loadRepos() {
 $("#repoBtn").onclick = () => $("#repoPanel").classList.toggle("open");
 document.addEventListener("click", (e) => { if (!$("#repoMenu").contains(e.target)) $("#repoPanel").classList.remove("open"); });
 
-let live = null, daily = null;
+let live = null, daily = null, quota = null;
+const untilText = (iso) => { if (!iso) return ""; const mins = Math.round((new Date(iso) - Date.now()) / 60000); if (mins <= 0) return "resetting"; const h = Math.floor(mins / 60), m = mins % 60; return h >= 48 ? `${Math.floor(h / 24)}d ${h % 24}h` : h ? `${h}h ${String(m).padStart(2, "0")}m` : `${m}m`; };
+const whenText = (iso) => { if (!iso) return ""; const d = new Date(iso), sameDay = dayKey(d) === today(); return d.toLocaleString([], sameDay ? { hour: "numeric", minute: "2-digit" } : { weekday: "short", hour: "numeric", minute: "2-digit" }); };
+let quotaPoll = null;
+async function loadQuota(force) {
+  try { quota = await api(`/api/quota${force ? "?force=1" : ""}`); renderQuota(); } catch (e) { console.warn("quota:", e.message); }
+  clearTimeout(quotaPoll);
+  if (quota?.refreshing) quotaPoll = setTimeout(() => loadQuota(), 10 * 1000);
+}
+function renderQuota() {
+  const el = $("#quota");
+  if (!quota || !quota.available) { el.hidden = true; return; }
+  el.hidden = false;
+  const weekly = (a) => a.windows.find((w) => w.name === "7 day")?.pct || 0;
+  const accounts = [...quota.accounts].sort((a, b) => (a.provider > b.provider) - (a.provider < b.provider) || weekly(b) - weekly(a));
+  const domains = new Set(accounts.map((a) => (a.label.match(/@([^-]+)/) || [])[1]).filter(Boolean));
+  const shared = domains.size === 1 ? [...domains][0] : null;
+  const shortLabel = (label) => shared ? label.replace(`@${shared}`, "") : label;
+  $("#quotaGrid").innerHTML = accounts.map((a) => {
+    const spent = a.windows.some((w) => /^(5 hour|7 day)$/.test(w.name) && (w.pct || 0) >= 95);
+    return `<div class="qcard${spent ? " spent" : ""}"><div class="who"><span class="email" title="${esc(a.label)} · ${esc(a.file)}${a.fetched_at ? ` · as of ${ago(a.fetched_at)} ago` : ""}">${esc(shortLabel(a.label))}</span><span class="id">${a.provider === "claude" ? "" : esc(a.provider) + " "}${esc(a.id.slice(0, 4))}</span><span class="used">used</span></div>` +
+      a.windows.map((w) => { if (w.pct === null) return `<div class="qrow"><span class="qn">${esc(w.name)}</span><span class="qbar"></span><span class="qv">–</span><span class="qreset">no window reported</span></div>`;
+        const cls = w.pct >= 95 ? " bad" : w.pct >= 75 ? " warn" : "", state = w.pct >= 95 ? "Spent" : w.pct >= 75 ? "Warning" : "";
+        return `<div class="qrow${cls}"><span class="qn">${esc(w.name)}</span><span class="qbar"><i style="width:${Math.min(100, w.pct)}%"></i></span><span class="qv">${w.pct}%</span>
+          <span class="qreset"><span>${state ? `<b>${state}</b> · ` : ""}${w.resets_at ? `resets in <b>${untilText(w.resets_at)}</b>` : w.pct ? "reset unknown" : "unused"}</span><span>${w.resets_at ? whenText(w.resets_at) : ""}</span></span></div>`; }).join("") +
+      (a.resets ? `<div class="qnote">Manual resets: <b>${a.resets.available ?? "?"}</b> available${a.resets.expires_at ? `, first expires ${whenText(a.resets.expires_at)} (${untilText(a.resets.expires_at)})` : ""}</div>` : "") +
+      (a.error ? `<div class="qnote">⚠️ ${esc(a.error)}</div>` : "") + "</div>";
+  }).join("");
+  $("#quotaSub").textContent = `${accounts.length} accounts${shared ? ` @${shared}` : ""} · as of ${quota.fetched_at ? ago(quota.fetched_at) + " ago" : "?"}${quota.refreshing ? " · refreshing" : ""} · Claude via cpa-route, Codex via chatgpt.com`;
+}
+setInterval(renderQuota, 60 * 1000);
+
 async function api(path) { const r = await fetch(path); const j = await r.json(); if (!r.ok) throw new Error(j.error || r.statusText); return j; }
 function setStatus(t, err, busy) { $("#status").textContent = t; $("#status").className = "status" + (err ? " err" : "") + (busy ? " busy" : ""); document.body.classList.toggle("busy", Boolean(busy)); }
 
@@ -528,7 +577,7 @@ document.querySelectorAll("#issueFilter button, #prFilter button").forEach((b) =
 $("#issueWin").onchange = (e) => { winOnly.issues = e.target.checked; store.set("winOnly", winOnly); renderLive(); };
 $("#prWin").onchange = (e) => { winOnly.prs = e.target.checked; store.set("winOnly", winOnly); renderLive(); };
 $("#workWeek").onchange = (e) => { workWeek = e.target.checked; store.set("workWeek", workWeek); renderDaily(); };
-$("#refresh").onclick = () => { loadLive(); loadDaily(true); };
+$("#refresh").onclick = () => { loadLive(); loadDaily(true); loadQuota(true); };
 $("#pickupRefresh").onclick = () => loadLive($("#pickupRefresh"));
 window.addEventListener("resize", () => daily && drawChart(currentRange().from, currentRange().to));
 function renderAll() { renderLive(); renderDaily(); }
@@ -569,7 +618,7 @@ async function start() {
   $("#signin").classList.remove("open");
   $("#who").textContent = st.login;
   $("#signout").style.display = st.owner ? "none" : "";
-  if (st.owner) loadRepos();
+  if (st.owner) { loadRepos(); loadQuota(); setInterval(loadQuota, 5 * 60 * 1000); }
   loadLive(); loadDaily();
   setInterval(loadLive, 2 * 60 * 1000);
   setInterval(() => loadDaily(false), 5 * 60 * 1000);

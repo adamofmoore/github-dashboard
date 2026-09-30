@@ -2,9 +2,9 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { demoDaily, demoLive, demoRepos } from "./demo.mjs";
+import { demoDaily, demoLive, demoQuota, demoRepos } from "./demo.mjs";
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 4747);
@@ -224,6 +224,75 @@ async function liveData(c) {
     prs: prs.map(slimPr), reviewRequests: reviewRequests.map(slimPr) };
 }
 
+// ---------- Claude quotas from cpa-route (owner only) ----------
+const USAGE_CACHE = (process.env.CPA_USAGE_CACHE || "~/.config/cpa-route/usage-cache.json").replace(/^~/, process.env.HOME);
+const CPA_ROUTE = (process.env.CPA_ROUTE_BIN || "~/.local/bin/cpa-route").replace(/^~/, process.env.HOME);
+const QUOTA_STALE_MS = 15 * 60 * 1000;
+let quotaRefresh = null;
+function refreshQuota() {
+  if (quotaRefresh || !fs.existsSync(CPA_ROUTE)) return;
+  quotaRefresh = new Promise((resolve) => execFile(CPA_ROUTE, ["ranking"], { timeout: 120 * 1000 }, (err) => { if (err) console.error("cpa-route ranking:", err.message); resolve(); }))
+    .finally(() => { quotaRefresh = null; });
+}
+const AUTH_DIR = (process.env.CPA_AUTH_DIR || "~/.cli-proxy-api").replace(/^~/, process.env.HOME);
+function orgSuffix(file) {
+  try {
+    const { organization_name: org, email } = JSON.parse(fs.readFileSync(path.join(AUTH_DIR, file), "utf8"));
+    return org && !org.startsWith(`${email}'s`) ? "-team" : "";
+  } catch { return ""; }
+}
+const window_ = (name, pct, resets_at) => ({ name, pct: Math.round(pct), resets_at: resets_at || null });
+function claudeAccounts() {
+  let raw; try { raw = JSON.parse(fs.readFileSync(USAGE_CACHE, "utf8")); } catch { return null; }
+  return Object.entries(raw).filter(([file]) => file.startsWith("claude-")).map(([file, v]) => {
+    const u = v.usage || {}, m = file.match(/^claude-([0-9a-f]+)-(.+?)\.json$/);
+    const fable = (u.limits || []).find((l) => l.kind === "weekly_scoped" && l.scope?.model?.display_name === "Fable");
+    const w = (name, x) => x && typeof x.utilization === "number" ? window_(name, x.utilization, x.resets_at) : { name, pct: null, resets_at: null };
+    return { file, provider: "claude", id: m ? m[1] : file, label: (m ? m[2] : file) + orgSuffix(file), fetched_at: v.fetched_at || null,
+      windows: [w("5 hour", u.five_hour), w("7 day", u.seven_day), fable ? window_("Fable", fable.percent, fable.resets_at) : { name: "Fable", pct: null, resets_at: null }] };
+  });
+}
+const CODEX_UA = "codex-tui/0.149.1 (Mac OS 26.5.2; arm64) iTerm.app/3.6.11 (codex-tui; 0.149.1)";
+const CODEX_TTL_MS = 5 * 60 * 1000;
+const codexCache = new Map();
+async function codexJson(url, auth) {
+  const r = await fetch(url, { headers: { Authorization: `Bearer ${auth.access_token}`, "ChatGPT-Account-Id": auth.account_id || "", "Content-Type": "application/json", "User-Agent": CODEX_UA } });
+  if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+  return r.json();
+}
+const codexWindow = (name, w) => w && typeof w.used_percent === "number" ? window_(name, w.used_percent, w.reset_at ? new Date(w.reset_at * 1000).toISOString() : null) : null;
+const secondsName = (sec) => sec % 86400 === 0 ? `${sec / 86400} day` : sec % 3600 === 0 ? `${sec / 3600} hour` : `${Math.round(sec / 60)} min`;
+async function codexAccount(file, force) {
+  const hit = codexCache.get(file);
+  if (hit && !force && Date.now() - hit.at < CODEX_TTL_MS) return hit.data;
+  let auth; try { auth = JSON.parse(fs.readFileSync(path.join(AUTH_DIR, file), "utf8")); } catch { return null; }
+  const m = file.match(/^codex-([0-9a-f]+)-(.+?)(?:-(\w+))?\.json$/);
+  const base = { file, provider: "codex", id: m ? m[1] : file, label: m ? m[2] : auth.email || file, fetched_at: new Date().toISOString(), windows: [], resets: null };
+  try {
+    const [usage, credits] = await Promise.all([codexJson("https://chatgpt.com/backend-api/wham/usage", auth), codexJson("https://chatgpt.com/backend-api/wham/rate-limit-reset-credits", auth).catch(() => null)]);
+    const rl = usage.rate_limit || {};
+    base.label += usage.plan_type ? `-${usage.plan_type}` : "";
+    base.windows = [codexWindow(rl.secondary_window ? secondsName(rl.secondary_window.limit_window_seconds) : "5 hour", rl.secondary_window), codexWindow(rl.primary_window ? secondsName(rl.primary_window.limit_window_seconds) : "7 day", rl.primary_window)].filter(Boolean);
+    for (const extra of usage.additional_rate_limits || []) { const w = codexWindow(`${extra.limit_name} ${secondsName(extra.rate_limit?.primary_window?.limit_window_seconds || 0)}`, extra.rate_limit?.primary_window); if (w) base.windows.push(w); }
+    const available = (credits?.credits || []).filter((c) => c.status === "available");
+    base.resets = { available: credits ? available.length : usage.rate_limit_reset_credits?.available_count ?? null, expires_at: available.map((c) => c.expires_at).filter(Boolean).sort()[0] || null };
+  } catch (e) { console.error(`codex quota for ${file}:`, e.message); base.error = e.message; }
+  codexCache.set(file, { at: Date.now(), data: base });
+  return base;
+}
+async function codexAccounts(force) {
+  let files; try { files = fs.readdirSync(AUTH_DIR).filter((f) => f.startsWith("codex-") && f.endsWith(".json")); } catch { return []; }
+  return (await Promise.all(files.map((f) => codexAccount(f, force)))).filter(Boolean);
+}
+async function quotaData(force) {
+  const claude = claudeAccounts();
+  if (!claude) return { available: false };
+  const fetched = claude.map((a) => Date.parse(a.fetched_at)).filter(Number.isFinite);
+  const oldest = fetched.length ? Math.min(...fetched) : 0;
+  if (force || !oldest || Date.now() - oldest > QUOTA_STALE_MS) refreshQuota();
+  return { available: true, fetched_at: oldest ? new Date(oldest).toISOString() : null, refreshing: Boolean(quotaRefresh), accounts: [...claude, ...(await codexAccounts(force))] };
+}
+
 // ---------- local repos (owner only) ----------
 const SCAN_ROOTS = (process.env.REPO_ROOTS || "~,~/Studio").split(",").map((r) => r.trim().replace(/^~/, process.env.HOME)).filter(Boolean);
 const SKIP = new Set(["node_modules", "Library", ".worktrees", "worktrees", ".git", "Downloads", "Applications", "Movies", "Music", "Pictures", ...(process.env.REPO_SKIP || "Dropbox (Personal),TrainerRoad Dropbox").split(",").map((x) => x.trim()).filter(Boolean)]);
@@ -274,6 +343,7 @@ const server = http.createServer(async (req, res) => {
       if (url.pathname === "/api/auth/status" || url.pathname === "/api/me") return send(res, 200, { loggedIn: true, login: "octocat", owner: true, deviceFlow: false });
       if (url.pathname === "/api/live") return send(res, 200, demoLive(today()));
       if (url.pathname === "/api/repos") return send(res, 200, { repos: demoRepos });
+      if (url.pathname === "/api/quota") return send(res, 200, demoQuota());
       if (url.pathname === "/api/daily") {
         const to = url.searchParams.get("to") || today(), from = url.searchParams.get("from") || to, days = daysBetween(from, to);
         return send(res, 200, { user: "octocat", from, to, today: today(), days, metrics: demoDaily(days, today()) });
@@ -314,6 +384,7 @@ const server = http.createServer(async (req, res) => {
       if (url.pathname === "/api/live") return send(res, 200, await liveData(c));
       if (url.pathname === "/api/me") return send(res, 200, { login: await c.me(), owner: Boolean(s.owner) });
       if (url.pathname === "/api/repos") return send(res, 200, { repos: s.owner ? localRepos() : [] });
+      if (url.pathname === "/api/quota") return send(res, 200, s.owner ? await quotaData(url.searchParams.get("force") === "1") : { available: false });
       if (url.pathname === "/api/daily") {
         const to = url.searchParams.get("to") || today(), from = url.searchParams.get("from") || to;
         if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) || from > to) return send(res, 400, { error: "bad range" });

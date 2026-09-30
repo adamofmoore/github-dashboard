@@ -1,6 +1,6 @@
 # github-dashboard
 
-Local dashboard of your own GitHub activity: assigned issues, open PRs, and per-day opened/merged counts.
+Local dashboard of your own GitHub activity: assigned issues, open PRs, per-day opened/merged counts, and (optionally) your Claude and Codex quotas.
 
 ![Dashboard with sample data](docs/screenshot.png)
 
@@ -22,6 +22,12 @@ Others sign in with their own GitHub account and see their own numbers. Their to
    - **One-click "Sign in with GitHub"**: create an OAuth App at github.com/settings/developers, tick *Enable Device Flow*, then put `GITHUB_CLIENT_ID=<client id>` in a `.env` file next to `start.sh`. No client secret is needed for device flow.
 
 Only the owner session (localhost with `gh`) sees the "Cloned on this Mac" repo group; guests see repos from their own activity.
+
+## AI quotas (optional, owner only)
+
+![AI quotas row with sample data](docs/ai-quotas.png)
+
+If [cpa-route](https://github.com/KWedey/dev-environment) is installed, a row at the top shows each Claude account's 5-hour, 7-day, and Fable windows with their reset times. The numbers come from cpa-route's usage cache (`~/.config/cpa-route/usage-cache.json`); when it is more than 15 minutes old the dashboard runs `cpa-route ranking` in the background, which refetches under cpa-route's own rate-limit rules, and the row updates when it finishes (the page re-polls every ten seconds while a refresh is running). A Claude account whose auth file names a real organization (not "<email>'s Organization") is labelled `-team`. Codex accounts (`codex-*.json` in the same auth folder) are queried at chatgpt.com with their own token, at most every five minutes, for the rate-limit windows and the number of manual reset credits still available. `CPA_USAGE_CACHE`, `CPA_ROUTE_BIN`, and `CPA_AUTH_DIR` override the paths. Guests never see this row.
 
 ## Demo mode
 
