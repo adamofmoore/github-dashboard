@@ -33,8 +33,9 @@ Only the owner session (localhost with `gh`) sees the "Cloned on this Mac" repo 
 - My open PRs: `author:me is:pr is:open`. In review = not draft.
 - Issues opened: created by me that day. Issues closed: assigned to me, closed that day.
 - PRs opened / merged: authored by me.
-- Pickup order: every open assigned issue gets a zone from its labels, then its title, then its first body line (`public/triage.js`). A high-priority label wins outright; otherwise tracking/feature framing, explicit decisions, critical, broken instruments, accessibility, cleanup, with correctness debt as the default. The list refetches every 2 minutes; **Refresh list** pulls it now. `node --test test/triage.test.js` pins the rules.
-- Days are local midnight to midnight (server timezone).
+- Pickup order: every open assigned issue gets a zone from its labels, then its title, then its first body line (`public/triage.js`). A high-priority label wins outright; otherwise tracking/feature framing, explicit decisions, critical, broken instruments, accessibility, cleanup, with correctness debt as the default. The list refetches every 2 minutes; **Refresh list** pulls it now. `node --test "test/*.test.js"` pins the rules.
+- **Normalize for work week**: the work week is Monday to Thursday. Per-day averages divide by work days only, and *Yesterday* means the previous work day — on a Monday that is the prior week's Thursday.
+- Days are local midnight to midnight (server timezone). The day math lives in `public/dates.js` and is pinned by `test/dates.test.js`.
 
 ## Configuration (`.env` next to `start.sh`, all optional)
 
@@ -46,5 +47,5 @@ Only the owner session (localhost with `gh`) sees the "Cloned on this Mac" repo 
 
 ## Data and settings
 
-- Past days cache per user in `cache/days-<login>.json`; today is refetched at most every 90s. A background loop keeps the last 90 days warm for every signed-in user.
+- Past days cache per user in `cache/days-<login>.json`; today is refetched at most every 90s. A past day is only reused once it was fetched *after* that day ended, so a day first cached mid-evening is refetched once and then settles. A background loop keeps the last 90 days warm for every signed-in user.
 - Repo filter, preset, custom range, and theme live in the browser's localStorage.
