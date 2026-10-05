@@ -1,0 +1,38 @@
+name: Close outside PRs
+# This repo only takes changes written by its owner. Anyone may fork it; a pull
+# request from anyone else is closed as soon as it opens, with a note saying why.
+on:
+  pull_request_target:
+    types: [opened, reopened]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: PR number to re-check
+        required: true
+permissions:
+  pull-requests: write
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      # Only the GitHub API is touched — the pull request's own code is never
+      # checked out or run, which is what makes pull_request_target safe here.
+      - name: Close it unless the author is allowed
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number || inputs.pr }}
+          # The bot is the README screenshot workflow opening its own PR.
+          ALLOWED: "adamofmoore github-actions[bot]"
+        run: |
+          set -euf -o pipefail
+          author=$(gh api "repos/$REPO/pulls/$PR" --jq .user.login)
+          state=$(gh api "repos/$REPO/pulls/$PR" --jq .state)
+          echo "PR #$PR by $author ($state)"
+          for a in $ALLOWED; do
+            if [ "$a" = "$author" ]; then echo "Author is allowed — leaving it open."; exit 0; fi
+          done
+          if [ "$state" != "open" ]; then echo "Author is not allowed, but the PR is already $state."; exit 0; fi
+          echo "Author is not allowed — closing."
+          gh pr close "$PR" --repo "$REPO" --comment "Thanks for the interest in this project. It's a personal dashboard and I only merge changes I've written myself, so I'm closing this rather than leaving it open — it isn't a judgement on the work. You're very welcome to keep your version on your fork."
