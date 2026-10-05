@@ -253,7 +253,7 @@ table { table-layout:fixed } th:first-child, td:first-child { width:auto } td.nu
 
   <section>
     <header><h2>Activity by day</h2><span class="sub">midnight to midnight, local time</span>
-      <label class="win-only" title="Per-day averages count Monday to Thursday only"><input type="checkbox" id="workWeek"> Normalize for work week</label></header>
+      <label class="win-only" title="Work week is Monday to Thursday: per-day averages count those days only, and Yesterday means the previous work day"><input type="checkbox" id="workWeek"> Normalize for work week</label></header>
     <div class="tiles" id="tiles"></div>
     <details id="chartDetails"><summary>Show chart</summary>
     <div class="chart-wrap" id="chartWrap"><div class="chart-head"><div class="legend" id="legend"></div><div class="segs" id="chartSize"><button data-h="150">Compact</button><button data-h="280">Regular</button></div></div><svg id="chart" height="280" style="width:100%;display:block"></svg><div class="tip" id="tip"></div></div></details>
@@ -333,6 +333,7 @@ let winOnly = store.get("winOnly", { issues: false, prs: false });
 let workWeek = store.get("workWeek", false);
 $("#workWeek").checked = workWeek;
 const isWorkDay = (k) => { const [y,m,d] = k.split("-").map(Number); const dow = new Date(y, m-1, d).getDay(); return dow >= 1 && dow <= 4; };
+const prevDay = (k) => { let d = shift(k, -1); if (workWeek) for (let i = 0; i < 7 && !isWorkDay(d); i++) d = shift(d, -1); return d; };
 let listFilter = store.get("listFilter", { issues: "open", prs: "all" });
 if (listFilter.issues === "all") listFilter.issues = "open";
 const HIST_DAYS = 30;
@@ -370,7 +371,7 @@ function setStatus(t, err, busy) { $("#status").textContent = t; $("#status").cl
 function currentRange() {
   const t = today();
   if (activeTile === "today") return { from: t, to: t };
-  if (activeTile === "yesterday") return { from: shift(t,-1), to: shift(t,-1) };
+  if (activeTile === "yesterday") { const y = prevDay(t); return { from: y, to: y }; }
   if (activeTile === "7d") return { from: shift(t,-6), to: t };
   if (activeTile === "30d") return { from: shift(t,-29), to: t };
   return customRange;
@@ -463,8 +464,8 @@ function itemsIn(metric, from, to) {
   return out.sort((a,b) => b.day.localeCompare(a.day) || b.repo.localeCompare(a.repo));
 }
 function windowFor(id) {
-  const t = today(); const r = currentRange();
-  return { today:[t,t], yesterday:[shift(t,-1),shift(t,-1)], "7d":[shift(t,-6),t], "30d":[shift(t,-29),t], custom:[customRange.from, customRange.to] }[id];
+  const t = today(); const y = prevDay(t);
+  return { today:[t,t], yesterday:[y,y], "7d":[shift(t,-6),t], "30d":[shift(t,-29),t], custom:[customRange.from, customRange.to] }[id];
 }
 function renderDaily() {
   if (!daily) return;
@@ -478,7 +479,7 @@ function renderDaily() {
     <div class="label"><span class="lt">${label}</span><em>${id === "custom" ? customMeta + (workWeek && nDays > 1 ? ` · ${divDays} work day${divDays === 1 ? "" : "s"}` : "") : nDays > 1 ? (workWeek ? `${divDays} work day${divDays === 1 ? "" : "s"}` : `${nDays} days`) : fmtDay(from)}</em></div>${dates}
     <div class="nums">${SERIES.map(([m, , col, short]) => { const n = countIn(m, from, to); let tail = "&nbsp;", cls = "";
       if (nDays > 1) tail = divDays ? `${fmtAvg(n / divDays)}<em>/day</em>` : `<em>no work days</em>`;
-      else { const prev = countIn(m, shift(from, -1), shift(from, -1)), d = n - prev; cls = d > 0 ? "up" : d < 0 ? "down" : "flat"; tail = `${d > 0 ? "+" : d < 0 ? "−" : "±"}${Math.abs(d)}<em> yday</em>`; }
+      else { const pd = prevDay(from), prev = countIn(m, pd, pd), d = n - prev; cls = d > 0 ? "up" : d < 0 ? "down" : "flat"; tail = `${d > 0 ? "+" : d < 0 ? "−" : "±"}${Math.abs(d)}<em> ${pd === shift(from, -1) ? "yday" : "prev"}</em>`; }
       return `<div class="n"><b>${n}</b><span>${short}</span><span class="avg ${cls}">${tail}</span></div>`; }).join("")}</div></div>`; }).join("");
   const pick = (id) => { if (activeTile === id) return; activeTile = id; store.set("activeTile", activeTile); loadDaily(); };
   document.querySelectorAll(".tile").forEach((b) => { b.onclick = (e) => { if (e.target.closest(".dates, .datelink")) return; pick(b.dataset.tile); }; b.onkeydown = (e) => { if ((e.key === "Enter" || e.key === " ") && !e.target.closest(".dates")) { e.preventDefault(); pick(b.dataset.tile); } }; });
