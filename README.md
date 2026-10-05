@@ -45,6 +45,10 @@ Only the owner session (localhost with `gh`) sees the "Cloned on this Mac" repo 
 - `REPO_ROOTS=~,~/Studio` comma-separated folders scanned for local clones (depth 6).
 - `REPO_SKIP=Dropbox (Personal),TrainerRoad Dropbox` extra folder names to skip while scanning.
 
+## Contributions
+
+Fork it freely, but pull requests from anyone other than me are closed automatically by `.github/workflows/outside-prs.yml` — it is a personal dashboard, not a shared project. Keep your version on your fork.
+
 ## Data and settings
 
 - Past days cache per user in `cache/days-<login>.json`; today is refetched at most every 90s. A past day is only reused once it was fetched *after* that day ended, so a day first cached mid-evening is refetched once and then settles. A background loop keeps the last 90 days warm for every signed-in user.
