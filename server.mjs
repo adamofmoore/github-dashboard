@@ -158,30 +158,34 @@ const caches = new Map();
 function cacheFor(login) {
   if (caches.has(login)) return caches.get(login);
   const file = path.join(CACHE_DIR, `days-${login}.json`);
-  let data = {};
-  try { data = JSON.parse(fs.readFileSync(file, "utf8")); } catch {}
+  let raw = {};
+  try { raw = JSON.parse(fs.readFileSync(file, "utf8")); } catch {}
+  // Legacy files were a bare { "metric:day": items } map with no fetch times; a day
+  // from one of those refetches once and is then settled like any other.
+  const stored = raw.days && raw.fetchedAt ? raw : { days: raw, fetchedAt: {} };
   let timer = null;
-  const entry = { data, save() { clearTimeout(timer); timer = setTimeout(() => fs.writeFileSync(file, JSON.stringify(data)), 250); } };
+  const entry = { data: stored.days, fetchedAt: stored.fetchedAt, save() { clearTimeout(timer); timer = setTimeout(() => fs.writeFileSync(file, JSON.stringify(stored)), 250); } };
   caches.set(login, entry);
   return entry;
 }
 const inflight = new Map();
 const FRESH_MS = 90 * 1000;
-const freshness = new Map();
 async function dailyData(c, fromKey, toKey, force, background = false) {
   const user = await c.me();
   const cache = cacheFor(user);
   const tKey = today(), days = daysBetween(fromKey, toKey), out = {};
   for (const metric of Object.keys(METRICS)) {
     out[metric] = {};
-    const fresh = (d) => d < tKey || (Date.now() - (freshness.get(`${user}:${metric}:${d}`) || 0) < FRESH_MS);
+    // A past day is reusable only once it was fetched after it ended — otherwise a
+    // day cached mid-evening would keep its partial counts forever.
+    const fresh = (d) => { const at = cache.fetchedAt[`${metric}:${d}`] || 0; return at > 0 && (d < tKey ? at >= endOfDay(d).getTime() : Date.now() - at < FRESH_MS); };
     const missing = days.filter((d) => force || !(fresh(d) && cache.data[`${metric}:${d}`]));
     const spans = [];
     for (const d of missing) { const last = spans[spans.length - 1]; if (last && daysBetween(last[1], d).length === 2) last[1] = d; else spans.push([d, d]); }
     await Promise.all(spans.map(async ([a, b]) => {
       const key = `${user}:${metric}:${a}:${b}`;
       if (!inflight.has(key)) inflight.set(key, searchRange(c, metric, a, b, user, background).finally(() => inflight.delete(key)));
-      for (const { day, items } of await inflight.get(key)) { cache.data[`${metric}:${day}`] = items; if (day >= tKey) freshness.set(`${user}:${metric}:${day}`, Date.now()); out[metric][day] = items; }
+      for (const { day, items } of await inflight.get(key)) { cache.data[`${metric}:${day}`] = items; cache.fetchedAt[`${metric}:${day}`] = Date.now(); out[metric][day] = items; }
     }));
     for (const d of days) if (!out[metric][d]) out[metric][d] = cache.data[`${metric}:${d}`] || [];
   }
