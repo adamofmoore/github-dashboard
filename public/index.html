@@ -328,7 +328,7 @@ let selectedRepos = savedSelection === null
   ? (legacyExcluded.size ? new Set([...knownRepos].filter((r) => !legacyExcluded.has(r.toLowerCase())).map((r) => r.toLowerCase())) : null)
   : new Set(savedSelection.map((r) => r.toLowerCase()));
 const saveRepos = () => store.set("selectedRepos", selectedRepos === null ? null : [...selectedRepos]);
-saveRepos();
+if (savedSelection === null && legacyExcluded.size) saveRepos();
 let customRange = store.get("customRange", { from: shift(today(), -6), to: today() });
 let activeTile = store.get("activeTile", "7d");
 if (activeTile === "range") activeTile = "custom";
