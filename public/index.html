@@ -280,7 +280,7 @@ table { table-layout:fixed } th:first-child, td:first-child { width:auto } td.nu
   </div>
 
   <section id="pickup">
-    <header><h2>Pickup order</h2><span class="count" id="pickupCount">–</span><span class="sub">Open issues assigned to me, ranked by how much damage each is doing.</span><span class="spacer"></span><span class="sub" id="pickupStamp"></span><button id="pickupRefresh">Refresh list</button></header>
+    <header><h2>Pickup order</h2><span class="count" id="pickupCount">–</span><span class="sub">Open issues assigned to me in the selected repos, ranked by how much damage each is doing.</span><span class="spacer"></span><span class="sub" id="pickupStamp"></span><button id="pickupRefresh">Refresh list</button></header>
     <div class="ramp" id="ramp"></div>
     <div class="zonebar" id="zonebar"></div>
     <div id="bands"></div>
@@ -322,7 +322,13 @@ function skeletons() {
   $("#bands").innerHTML = skRows(5);
 }
 skeletons();
-let excluded = new Set(store.get("excludedRepos", []));
+const legacyExcluded = new Set(store.get("excludedRepos", []).map((r) => r.toLowerCase()));
+if (legacyExcluded.size && store.get("legacySelectedRepos", null) === null) {
+  store.set("legacySelectedRepos", [...knownRepos].filter((r) => !legacyExcluded.has(r.toLowerCase())).map((r) => r.toLowerCase()));
+}
+const savedSelection = store.get("selectedRepos", legacyExcluded.size ? store.get("legacySelectedRepos", []) : null);
+let selectedRepos = savedSelection === null ? null : new Set(savedSelection.map((r) => r.toLowerCase()));
+const saveRepos = () => store.set("selectedRepos", selectedRepos === null ? null : [...selectedRepos]);
 let customRange = store.get("customRange", { from: shift(today(), -6), to: today() });
 let activeTile = store.get("activeTile", "7d");
 if (activeTile === "range") activeTile = "custom";
@@ -340,7 +346,7 @@ function renderChartSize() { document.querySelectorAll("#chartSize button").forE
 document.querySelectorAll("#chartSize button").forEach((b) => b.onclick = () => { chartH = Number(b.dataset.h); store.set("chartH", chartH); renderChartSize(); if (daily) drawChart(currentRange().from, currentRange().to); });
 renderChartSize();
 
-const visible = (repo) => !excluded.has(repo);
+const visible = (repo) => selectedRepos === null || selectedRepos.has(repo.toLowerCase());
 function noteRepos(list) { let changed = false; const lower = new Map([...knownRepos].map((r) => [r.toLowerCase(), r])); for (const r of list) if (!lower.has(r.toLowerCase())) { knownRepos.add(r); lower.set(r.toLowerCase(), r); changed = true; } if (changed) { store.set("knownRepos", [...knownRepos].sort()); renderRepoMenu(); } }
 function renderRepoMenu() {
   const repos = [...knownRepos].sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
@@ -350,10 +356,21 @@ function renderRepoMenu() {
   const n = repos.filter(visible).length;
   $("#repoBtn").textContent = n === repos.length ? "All repos" : `${n} of ${repos.length} repos`;
 }
-$("#repoList").addEventListener("change", (e) => { const r = e.target.dataset.repo; if (e.target.checked) excluded.delete(r); else excluded.add(r); store.set("excludedRepos", [...excluded]); renderRepoMenu(); renderAll(); });
-$("#repoAll").onclick = () => { excluded.clear(); store.set("excludedRepos", []); renderRepoMenu(); renderAll(); };
-$("#repoNone").onclick = () => { excluded = new Set(knownRepos); store.set("excludedRepos", [...excluded]); renderRepoMenu(); renderAll(); };
-$("#repoLocal").onclick = () => { excluded = new Set([...knownRepos].filter((r) => !localRepos.has(r.toLowerCase()))); store.set("excludedRepos", [...excluded]); renderRepoMenu(); renderAll(); };
+$("#repoList").addEventListener("change", (e) => {
+  const r = e.target.dataset.repo.toLowerCase();
+  if (selectedRepos === null) selectedRepos = new Set([...knownRepos].map((r) => r.toLowerCase()));
+  if (e.target.checked) selectedRepos.add(r); else selectedRepos.delete(r);
+  saveRepos(); renderRepoMenu(); renderAll();
+});
+$("#repoAll").onclick = () => { selectedRepos = null; store.set("excludedRepos", []); saveRepos(); renderRepoMenu(); renderAll(); };
+$("#repoNone").onclick = () => { selectedRepos = new Set(); saveRepos(); renderRepoMenu(); renderAll(); };
+$("#repoLocal").onclick = () => { selectedRepos = new Set([...knownRepos].filter((r) => localRepos.has(r.toLowerCase())).map((r) => r.toLowerCase())); saveRepos(); renderRepoMenu(); renderAll(); };
+window.addEventListener("storage", (e) => {
+  if (e.key !== "ghdash:selectedRepos") return;
+  const selection = store.get("selectedRepos", null);
+  selectedRepos = selection === null ? null : new Set(selection.map((r) => r.toLowerCase()));
+  renderRepoMenu(); renderAll();
+});
 async function loadRepos() {
   try { const r = await api("/api/repos"); localRepos = new Map(r.repos.map((x) => [x.repo.toLowerCase(), x.path])); noteRepos(r.repos.map((x) => x.repo)); renderRepoMenu(); } catch {}
 }
