@@ -322,13 +322,13 @@ function skeletons() {
   $("#bands").innerHTML = skRows(5);
 }
 skeletons();
-const savedSelection = store.get("selectedRepos", null);
 const legacyExcluded = new Set(store.get("excludedRepos", []).map((r) => r.toLowerCase()));
-let selectedRepos = savedSelection === null
-  ? (legacyExcluded.size ? new Set([...knownRepos].filter((r) => !legacyExcluded.has(r.toLowerCase())).map((r) => r.toLowerCase())) : null)
-  : new Set(savedSelection.map((r) => r.toLowerCase()));
+if (legacyExcluded.size && store.get("legacySelectedRepos", null) === null) {
+  store.set("legacySelectedRepos", [...knownRepos].filter((r) => !legacyExcluded.has(r.toLowerCase())).map((r) => r.toLowerCase()));
+}
+const savedSelection = store.get("selectedRepos", legacyExcluded.size ? store.get("legacySelectedRepos", []) : null);
+let selectedRepos = savedSelection === null ? null : new Set(savedSelection.map((r) => r.toLowerCase()));
 const saveRepos = () => store.set("selectedRepos", selectedRepos === null ? null : [...selectedRepos]);
-if (savedSelection === null && legacyExcluded.size) saveRepos();
 let customRange = store.get("customRange", { from: shift(today(), -6), to: today() });
 let activeTile = store.get("activeTile", "7d");
 if (activeTile === "range") activeTile = "custom";
