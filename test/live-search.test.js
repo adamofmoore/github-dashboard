@@ -207,3 +207,17 @@ test("overlapping fetches of the same list share one, so they cannot finish out 
   await search("k", fetchPage, { q });
   assert.equal(calls, 2);
 });
+
+test("separate live searches never share a fetch, so one token cannot be handed another's results", async () => {
+  // server.mjs keeps one createLiveSearch() per client (per token); the same query on two
+  // of them must reach each token's own fetchPage.
+  const broad = createLiveSearch(), narrow = createLiveSearch();
+  let release; const gate = new Promise((r) => (release = r));
+  const calls = { broad: 0, narrow: 0 };
+  const fetcher = (who, n) => async (after, first) => { calls[who]++; await gate; return github(items(n)).fetchPage(after, first); };
+  const a = broad("same query", fetcher("broad", 5), { q }), b = narrow("same query", fetcher("narrow", 2), { q });
+  release();
+  assert.equal((await a).length, 5);
+  assert.equal((await b).length, 2);
+  assert.deepEqual(calls, { broad: 1, narrow: 1 });
+});
