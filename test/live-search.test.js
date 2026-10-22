@@ -172,3 +172,38 @@ test("a gateway timeout on a page is retried at half the size, like a query GitH
   assert.deepEqual(await paginateSearch(gh.fetchPage, { q }), all);
   assert.deepEqual(gh.calls.map((c) => [c.offset, c.first]), [[0, 25], [0, 12], [12, 12], [24, 12]]);
 });
+
+test("a list that changes while paging is fetched again instead of missing the new result", async () => {
+  // 30 results; after the first page a new issue lands at the front, so page 2 reports 31
+  // and repeats the boundary item. The old code deduped down to 30 and dropped the new one.
+  const before = items(30), after = [{ number: 99, url: "https://github.com/o/r/issues/99" }, ...before];
+  let changed = false;
+  const gh = github(before, (c) => {
+    if (!changed && c.offset > 0) { changed = true; return github(after).fetchPage(Buffer.from(`cursor:${c.offset}`).toString("base64"), c.first); }
+    if (changed) return github(after).fetchPage(c.after, c.first);
+  });
+  const got = await paginateSearch(gh.fetchPage, { q });
+  assert.equal(got.length, 31);
+  assert.ok(got.some((n) => n.number === 99));
+});
+
+test("a list that keeps changing while paging fails rather than returning a guess", async () => {
+  let n = 30;
+  const fetchPage = async (after, first) => { n++; const all = items(n), offset = after ? Number(Buffer.from(after, "base64").toString().split(":")[1]) : 0;
+    const nodes = all.slice(offset, offset + first); return { issueCount: n, pageInfo: { hasNextPage: offset + nodes.length < n, endCursor: Buffer.from(`cursor:${offset + nodes.length}`).toString("base64") }, nodes }; };
+  await assert.rejects(paginateSearch(fetchPage, { q }), /kept changing while paging/);
+});
+
+test("overlapping fetches of the same list share one, so they cannot finish out of order", async () => {
+  const search = createLiveSearch();
+  let calls = 0, release;
+  const gate = new Promise((r) => (release = r));
+  const fetchPage = async (after, first) => { calls++; await gate; return github(items(3)).fetchPage(after, first); };
+  const a = search("k", fetchPage, { q }), b = search("k", fetchPage, { q });
+  release();
+  assert.deepEqual(await a, await b);
+  assert.equal(calls, 1);
+  // Once it finishes, the next fetch is a fresh one.
+  await search("k", fetchPage, { q });
+  assert.equal(calls, 2);
+});

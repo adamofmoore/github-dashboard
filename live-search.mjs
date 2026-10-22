@@ -18,6 +18,7 @@ export const PAGE_SIZE = 25;
 export const MIN_PAGE_SIZE = 5;
 export const EMPTY_RETRIES = 2;
 export const RESULT_LIMIT = 1000; // GitHub search never returns more results than this
+export const MAX_RESTARTS = 2;
 
 // client.graphql throws this, so the retry below can read GitHub's errors without
 // parsing the message.
@@ -44,7 +45,7 @@ export function isGitHubQueryFailure(err) {
 export async function paginateSearch(fetchPage, { q, pageSize = PAGE_SIZE, minPageSize = MIN_PAGE_SIZE, emptyRetries = EMPTY_RETRIES, lastCount = 0, log = () => {} }) {
   const fail = (msg, cause) => new Error(`GitHub search "${q}" ${msg}`, cause ? { cause } : undefined);
   const out = [], seen = new Set();
-  let after = null, size = pageSize, expected = null, empties = 0, dropped = 0;
+  let after = null, size = pageSize, expected = null, empties = 0, dropped = 0, restarts = 0;
   for (;;) {
     let page;
     try { page = await fetchPage(after, size); }
@@ -67,6 +68,14 @@ export async function paginateSearch(fetchPage, { q, pageSize = PAGE_SIZE, minPa
     }
     if (empties) log(`GitHub returned ${empties} empty page${empties > 1 ? "s" : ""} at result ${out.length + dropped + 1} before this one; asking again recovered it`);
     empties = 0;
+    // The list changed while paging, so offsets shifted and a result may have slid past
+    // a page boundary: start over rather than return a list missing it.
+    if (expected !== null && page.issueCount !== expected) {
+      if (++restarts > MAX_RESTARTS) throw fail(`kept changing while paging (${expected} then ${page.issueCount} results)`);
+      log(`results changed from ${expected} to ${page.issueCount} while paging; starting over`);
+      out.length = 0; seen.clear(); after = null; expected = null; dropped = 0;
+      continue;
+    }
     expected ??= page.issueCount;
     for (const n of page.nodes) {
       // A node the token cannot see comes back null; it still counts toward issueCount.
@@ -87,16 +96,23 @@ export async function paginateSearch(fetchPage, { q, pageSize = PAGE_SIZE, minPa
 // Remembers how many results each list returned last time, so a list that had results
 // is not blanked by one fetch's run of empty answers. The thrown error keeps the page on
 // its last good list. If the next fetch is empty too, the list is believed empty.
+// Callers asking for a list already being fetched (polling, Refresh, other tabs) share
+// that fetch, so two cannot finish out of order and overwrite each other's count.
 export function createLiveSearch() {
-  const last = new Map();
-  return async (key, fetchPage, options) => {
-    try {
-      const nodes = await paginateSearch(fetchPage, { ...options, lastCount: last.get(key) ?? 0 });
-      last.set(key, nodes.length);
-      return nodes;
-    } catch (e) {
-      if (e.doubtedEmpty) last.set(key, 0);
-      throw e;
-    }
+  const last = new Map(), pending = new Map();
+  return (key, fetchPage, options) => {
+    if (pending.has(key)) return pending.get(key);
+    const run = (async () => {
+      try {
+        const nodes = await paginateSearch(fetchPage, { ...options, lastCount: last.get(key) ?? 0 });
+        last.set(key, nodes.length);
+        return nodes;
+      } catch (e) {
+        if (e.doubtedEmpty) last.set(key, 0);
+        throw e;
+      } finally { pending.delete(key); }
+    })();
+    pending.set(key, run);
+    return run;
   };
 }
