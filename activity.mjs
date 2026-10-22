@@ -88,9 +88,11 @@ export function createActivity({ cacheFor, laneFor, log = () => {} }) {
       if (unconfirmed) {
         // Nothing could check this empty answer, and false ones come in bursts, so the
         // day settles only once another answer at least CONFIRM_MS later agrees. An
-        // earlier settled empty counts as that answer. Until then it keeps what it had,
-        // minus its fresh stamp, so later loads come back to confirm it.
-        const prior = cache.emptyAt[k] ?? (cache.fetchedAt[k] && cache.data[k]?.length === 0 ? cache.fetchedAt[k] : undefined);
+        // earlier settled empty counts as that answer, but for a past day only one seen
+        // after the day ended. Until then it keeps what it had, minus its fresh stamp, so
+        // later loads come back to confirm it.
+        const after = (at) => (at !== undefined && (day >= today() || at >= endOfDay(day).getTime()) ? at : undefined);
+        const prior = after(cache.emptyAt[k] ?? (cache.fetchedAt[k] && cache.data[k]?.length === 0 ? cache.fetchedAt[k] : undefined));
         if (prior === undefined || Date.now() - prior < CONFIRM_MS) {
           cache.emptyAt[k] = prior ?? Date.now(); delete cache.fetchedAt[k]; days[day] = cache.data[k] || [];
           if (days[day].length) pending.push(k); // showing saved items that may be gone

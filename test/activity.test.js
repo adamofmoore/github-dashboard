@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { createActivity, belongsIn, localDay, shift, today, CONFIRM_MS, CHECK_ITEMS } = require("../activity.mjs");
+const { createActivity, belongsIn, localDay, shift, today, startOfDay, CONFIRM_MS, CHECK_ITEMS } = require("../activity.mjs");
 const { searchLane } = require("../ratelimit.mjs");
 
 // Issues API shapes as GitHub returned them on 2026-10-22, with the repo renamed.
@@ -213,4 +213,20 @@ test("regression: a range's invalidation is saved even when a later metric fails
   await assert.rejects(d.dailyData(d.c, CLOSED_DAY, CLOSED_DAY, true, true));
   assert.ok(saved.length, "the cache was saved");
   assert.equal(saved[saved.length - 1][k], undefined, "with the stamp already cleared");
+});
+
+test("regression: an empty seen before a day ended can't confirm the finished day", async (t) => {
+  // Copilot's case: yesterday was cached empty at noon, and today's answers are empty but
+  // unverifiable. Noon says nothing about yesterday evening, so a new window starts.
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+  const day = shift(today(), -1), noon = startOfDay(day).getTime() + 12 * 3600e3;
+  for (const [field, data] of [["fetchedAt", []], ["emptyAt", [{ repo: "acme/web", number: 101, is_pr: true }]]]) {
+    const d = dashboard((url) => (url.includes("/search/") ? EMPTY : { status: 403 }));
+    const k = `prsMerged:${day}`;
+    d.cache.data[k] = data; d.cache[field][k] = noon;
+    await d.dailyData(d.c, day, day, true, true);
+    assert.equal(d.cache.fetchedAt[k], undefined, `${field} at noon: not settled`);
+    assert.equal(d.cache.emptyAt[k], Date.now(), `${field} at noon: the confirmation window starts now`);
+    assert.equal(d.cache.data[k], data, `${field} at noon: saved items kept`);
+  }
 });

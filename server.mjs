@@ -41,7 +41,7 @@ function client(token) {
     async gh(url, init = {}, prio = { background: false }) {
       const send = () => fetch(url, { ...init, headers: { ...c.headers, ...(init.headers || {}) } });
       const { pathname } = new URL(url);
-      const { res, body } = pathname.startsWith("/search/") ? await laneFor(await c.me()).request(send, prio) : await c.gate.request(send, pathname);
+      const { res, body } = pathname.startsWith("/search/") ? await laneFor(await c.me()).request(send, prio) : await c.gate.request(send, pathname, pathname === "/graphql" ? "graphql" : "core");
       if (res.status === 401) { const e = new Error("GitHub rejected the token"); e.code = 401; throw e; }
       if (!res.ok) { const e = new Error(`${res.status} ${res.statusText}: ${body}`); e.status = res.status; throw e; }
       return JSON.parse(body);

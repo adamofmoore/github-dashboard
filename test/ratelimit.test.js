@@ -394,3 +394,25 @@ test("regression: the API gate waits for a spent quota's reset, not just a short
   await done;
   assert.deepEqual(gh.calls.map((c) => Math.round((c.at - NOW) / 1000)), [0, 60]);
 });
+
+test("regression: a spent quota holds only its own resource; a secondary limit holds them all", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: NOW });
+  // Copilot's case: GraphQL succeeds with nothing left until a reset ten minutes out.
+  const graphqlSpent = { "x-ratelimit-remaining": 0, "x-ratelimit-reset": NOW / 1000 + 600, "x-ratelimit-resource": "graphql" };
+  const gh = github((n, label) => (label === "graphql" && n === 1 ? reply(200, "{}", graphqlSpent) : label === "secondary" ? reply(403, SECONDARY, quota(11)) : reply(200, "{}")));
+  const gate = apiGate();
+  await gate.request(gh.send("graphql"), "/graphql", "graphql");
+  await gate.request(gh.send("core"), "/repos/acme/web/issues/1", "core");
+  assert.equal((await gate.request(gh.send("graphql"), "/graphql", "graphql").catch((e) => e)).code, 429, "GraphQL waits for its own reset, past the patience");
+  assert.equal(gh.calls.length, 2, "while REST went straight through");
+  // A fresh token: a secondary limit on REST holds GraphQL as well.
+  const gate2 = apiGate(), gh2 = github((n) => (n === 1 ? reply(403, SECONDARY, quota(11)) : reply(200, "{}")));
+  const rest = gate2.request(gh2.send("rest"), "/user", "core");
+  await advance(t, 0);
+  const graphql = gate2.request(gh2.send("graphql"), "/graphql", "graphql");
+  await advance(t, 30e3);
+  assert.equal(gh2.calls.length, 1, "GraphQL waits out the REST secondary limit");
+  await advance(t, 31e3);
+  await Promise.all([rest, graphql]);
+  assert.deepEqual(gh2.calls.map((c) => [c.label, Math.round((c.at - NOW) / 1000)]), [["rest", 0], ["rest", 60], ["graphql", 60]]);
+});

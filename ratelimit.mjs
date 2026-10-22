@@ -38,18 +38,22 @@ export function limited(until, what = "search") {
 // Other REST calls on one token are not paced, but a rate limit one of them hits is
 // remembered, so the next call (say the page retrying sign-in) waits it out, or fails
 // at once if it outlasts the patience, rather than sending into it and extending it.
-// Until a call gets through again they go one at a time, so a call that wakes with the
-// others cannot send while the first one's answer is extending the pause. Only a call
-// sent after the latest limit ends that; one already out when it hit proves nothing.
+// A spent quota holds only its own resource (REST "core" and "graphql" are counted
+// apart); a secondary limit or retry-after holds every call on the token, and until a
+// call gets through again they go one at a time, so a call that wakes with the others
+// cannot send while the first one's answer is extending the pause. Only a call sent
+// after the latest such limit ends that; one already out when it hit proves nothing.
 export function apiGate({ patienceMs = PATIENCE_MS, log = () => {} } = {}) {
-  const s = { blockedUntil: 0, strikes: 0, limited: false, probe: null, limits: 0 };
+  const s = { blockedUntil: 0, resets: {}, strikes: 0, limited: false, probe: null, limits: 0 };
+  const pauseEnd = (resource) => Math.max(s.blockedUntil, s.resets[resource] || 0);
   return {
-    async request(send, what) {
+    async request(send, what, resource = "core") {
       const deadline = Date.now() + patienceMs;
       for (let tries = 1; ; tries++) {
         for (;;) {
-          if (s.blockedUntil > deadline) throw limited(s.blockedUntil, "API");
-          if (s.blockedUntil > Date.now()) await new Promise((r) => setTimeout(r, s.blockedUntil - Date.now()));
+          const until = pauseEnd(resource);
+          if (until > deadline) throw limited(until, "API");
+          if (until > Date.now()) await new Promise((r) => setTimeout(r, until - Date.now()));
           else if (s.probe) await s.probe;
           else break;
         }
@@ -58,19 +62,24 @@ export function apiGate({ patienceMs = PATIENCE_MS, log = () => {} } = {}) {
         if (s.limited) s.probe = new Promise((r) => (done = r));
         try {
           const res = await send(), body = await res.text();
-          // A spent quota holds every call until it resets, however short a retry-after is.
-          if (res.headers.get("x-ratelimit-remaining") === "0") s.blockedUntil = Math.max(s.blockedUntil, Number(res.headers.get("x-ratelimit-reset")) * 1000 || 0);
+          const spent = res.headers.get("x-ratelimit-remaining") === "0", reset = Number(res.headers.get("x-ratelimit-reset")) * 1000 || 0;
+          // A spent quota holds its resource until it resets, however short a retry-after is.
+          if (spent) s.resets[resource] = Math.max(s.resets[resource] || 0, reset);
           const wait = rateLimitWait(res.status, res.headers, body, s.strikes);
           if (wait === null) {
             if (since === s.limits) { s.strikes = 0; s.limited = false; }
             return { res, body };
           }
-          if (isSecondary(res.headers, body)) s.strikes++;
-          s.limited = true; s.limits++;
-          s.blockedUntil = Math.max(s.blockedUntil, Date.now() + wait);
+          if (spent && !Number(res.headers.get("retry-after")) && !/secondary rate limit/i.test(body)) {
+            s.resets[resource] = Math.max(s.resets[resource] || 0, Date.now() + wait);
+          } else {
+            if (isSecondary(res.headers, body)) s.strikes++;
+            s.limited = true; s.limits++;
+            s.blockedUntil = Math.max(s.blockedUntil, Date.now() + wait);
+          }
           log(`rate limit (${res.status}) on ${what}: waiting ${Math.round(wait / 1000)}s`);
         } finally { if (done) { s.probe = null; done(); } }
-        if (tries >= LIMITED_TRIES) throw limited(s.blockedUntil, "API");
+        if (tries >= LIMITED_TRIES) throw limited(pauseEnd(resource), "API");
       }
     },
   };
