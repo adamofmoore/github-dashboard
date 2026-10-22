@@ -38,21 +38,23 @@ export async function firstPage(page, stillThere, label, splittable = false) {
 }
 
 // The rest of the pages, up to GitHub's 1000-result cap. A later page that comes back
-// empty while the first promised more is the same glitch and is asked again, unless a
-// fresh first page shows the results really shrank below it; then the pages already
-// read are out of date, so paging starts over from that fresh first page.
+// empty while the first promised more is the same glitch and is asked again. A page
+// whose total differs from the first's may mean the results changed underneath; if a
+// fresh first page confirms the new total, the pages already read are out of date
+// (items left, or shifted between pages), so paging starts over from that fresh page.
 export async function restPages(page, first, label) {
-  let items = first.items, pages = Math.min(10, Math.ceil(first.total_count / 100)), restarts = 0;
+  let items = first.items, total = first.total_count, pages = Math.min(10, Math.ceil(total / 100)), restarts = 0;
   for (let p = 2; p <= pages; p++) {
     for (let tries = 1; ; tries++) {
       const r = await complete(page, p, label);
-      if (r.items.length) { items = items.concat(r.items); break; }
+      if (r.items.length && r.total_count === total) { items = items.concat(r.items); break; }
       const now = await complete(page, 1, label);
-      if (now.total_count && Math.ceil(now.total_count / 100) < p) {
-        if (++restarts > EMPTY_TRIES) throw unreliable(`GitHub search kept shrinking while paging for ${label}`);
-        items = now.items; pages = Math.min(10, Math.ceil(now.total_count / 100)); p = 1;
+      if (now.total_count && now.total_count !== total) {
+        if (++restarts > EMPTY_TRIES) throw unreliable(`GitHub search kept changing while paging for ${label}`);
+        items = now.items; total = now.total_count; pages = Math.min(10, Math.ceil(total / 100)); p = 1;
         break;
       }
+      if (r.items.length) { items = items.concat(r.items); break; } // the first page still agrees
       if (tries >= EMPTY_TRIES) throw unreliable(`GitHub search answered page ${p} of ${pages} with nothing ${EMPTY_TRIES} times for ${label}`);
     }
   }

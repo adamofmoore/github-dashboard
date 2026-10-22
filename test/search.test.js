@@ -131,3 +131,21 @@ test("a reply GitHub flags incomplete is asked again, and fails if it stays inco
   s = search({ 1: [results(150)], 2: [{ ...results(150, 20, 100), incomplete_results: true }, results(150, 50, 100)] });
   assert.equal((await restPages(s.page, await s.page(1), "x")).length, 150);
 });
+
+test("regression: a later page reporting fewer results restarts paging, though it isn't empty", async () => {
+  // Copilot's case: page 1 said 150; page 2 came back with 20 items and a total of 120,
+  // after some first-page issues were unassigned. Joining them would keep the removed
+  // ones and miss those that shifted onto page 1.
+  const s = search({ 1: [results(150, 100, 0), results(120, 100, 1000)], 2: [results(120, 20, 100), results(120, 20, 1100)] });
+  const items = await restPages(s.page, await s.page(1), "issuesClosed");
+  assert.equal(items.length, 120);
+  assert.ok(items.every((i) => i.id >= 1000), "only items from the fresh pages");
+  assert.deepEqual(s.asked, [1, 2, 1, 2]);
+});
+
+test("a later page whose total wobbles is kept when a fresh first page still agrees", async () => {
+  const s = search({ 1: [results(150), results(150)], 2: [results(149, 50, 100)] });
+  const items = await restPages(s.page, await s.page(1), "x");
+  assert.equal(items.length, 150);
+  assert.deepEqual(s.asked, [1, 2, 1]);
+});

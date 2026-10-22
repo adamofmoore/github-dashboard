@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { rateLimitWait, searchLane, apiGate, SEARCH_GAP_MS, SECONDARY_BASE_MS, SECONDARY_MAX_MS, PATIENCE_MS, LIMITED_TRIES } = require("../ratelimit.mjs");
+const { rateLimitWait, searchLane, apiGate, accountPenalty, SEARCH_GAP_MS, SECONDARY_BASE_MS, SECONDARY_MAX_MS, PATIENCE_MS, LIMITED_TRIES } = require("../ratelimit.mjs");
 
 // Bodies and headers as GitHub sent them on 2026-10-22 (request D037:324345:980C7D…).
 const SECONDARY = '{"message":"You have exceeded a secondary rate limit. Please wait a few minutes before you try again. For more on scraping GitHub and how it may affect your rights, please review our Terms of Service.","documentation_url":"https://docs.github.com/rest/overview/rate-limits-for-the-rest-api#about-secondary-rate-limits","status":"403"}';
@@ -423,21 +423,19 @@ test("regression: a penalty on either path holds the other; a spent search quota
   t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: NOW });
   // Copilot's case: GraphQL answers a secondary limit with retry-after: 120, and the
   // next search must not go out during it.
-  let penalty = { until: 0 }, shared = () => penalty;
+  let penalty = accountPenalty();
   const gh = github((n, label) => (label === "graphql" ? reply(403, SECONDARY, { "retry-after": 120 }) : reply(200, "{}")));
-  const gate = apiGate({ shared });
-  assert.equal((await gate.request(gh.send("graphql"), "/graphql", "graphql").catch((e) => e)).code, 429);
-  const search = await searchLane({ shared }).request(gh.send("search"), user()).catch((e) => e);
+  assert.equal((await apiGate({ account: () => penalty }).request(gh.send("graphql"), "/graphql", "graphql").catch((e) => e)).code, 429);
+  const search = await searchLane({ penalty }).request(gh.send("search"), user()).catch((e) => e);
   assert.equal(search.code, 429, "120s of penalty is past the search's patience");
   assert.deepEqual(gh.calls.map((c) => c.label), ["graphql"], "no search was sent");
 
   // And the other way: a search's secondary limit holds a REST call until it ends.
-  penalty = { until: 0 };
+  penalty = accountPenalty();
   const gh2 = github((n) => (n === 1 ? reply(403, SECONDARY, quota(11)) : reply(200, "{}")));
-  const lane = searchLane({ shared }), gate2 = apiGate({ shared });
-  const s = lane.request(gh2.send("search"), user());
+  const s = searchLane({ penalty }).request(gh2.send("search"), user());
   await advance(t, 1000);
-  const rest = gate2.request(gh2.send("rest"), "/user", "core");
+  const rest = apiGate({ account: () => penalty }).request(gh2.send("rest"), "/user", "core");
   await advance(t, 30e3);
   assert.equal(gh2.calls.length, 1, "the REST call waits out the search penalty");
   await advance(t, 35e3);
@@ -445,10 +443,33 @@ test("regression: a penalty on either path holds the other; a spent search quota
   assert.equal(gh2.calls.find((c) => c.label === "rest").at - NOW, SECONDARY_BASE_MS, "and goes once it is over");
 
   // A spent search quota limits searches only.
-  penalty = { until: 0 };
+  penalty = accountPenalty();
   const gh3 = github((n, label) => reply(200, "{}", label === "search" ? quota(0, 50) : {}));
-  await searchLane({ shared }).request(gh3.send("search"), user());
-  await apiGate({ shared }).request(gh3.send("rest"), "/user", "core");
+  await searchLane({ penalty }).request(gh3.send("search"), user());
+  await apiGate({ account: () => penalty }).request(gh3.send("rest"), "/user", "core");
   assert.deepEqual(gh3.calls.map((c) => c.label), ["search", "rest"]);
   assert.equal(gh3.calls[1].at, gh3.calls[0].at, "REST went straight out");
+});
+
+test("regression: calls waiting on a search's penalty go out one at a time when it ends", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: NOW });
+  // Copilot's case: a search trips a secondary limit, and the three live-list GraphQL
+  // calls are waiting on it. The first one's answer is held, and extends the pause.
+  const penalty = accountPenalty();
+  let n = 0;
+  const gh = github((_, label) => {
+    if (label === "search") return reply(403, SECONDARY, quota(11));
+    n++;
+    if (n === 1) return new Promise((r) => setTimeout(() => r(reply(429, "", { "retry-after": 30 })), 5000));
+    return reply(200, "{}");
+  });
+  const gate = apiGate({ account: () => penalty, patienceMs: 10 * 60e3 });
+  searchLane({ penalty, patienceMs: 0 }).request(gh.send("search"), user()).catch(() => {});
+  await advance(t, 0);
+  const lists = [1, 2, 3].map((i) => gate.request(gh.send(`graphql${i}`), "/graphql", "graphql"));
+  await advance(t, 60e3 + 5000 + 30e3 + 1000);
+  await Promise.all(lists);
+  const at = gh.calls.filter((c) => c.label !== "search").map((c) => [c.label, Math.round((c.at - NOW) / 1000)]);
+  assert.deepEqual(at.slice(0, 2), [["graphql1", 60], ["graphql1", 95]], "the first goes alone, and again after its own new pause");
+  assert.deepEqual(at.slice(2).map(([, s]) => s), [95, 95], "the others only once it got through");
 });

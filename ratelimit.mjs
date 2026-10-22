@@ -30,10 +30,6 @@ export const isSecondary = (headers, body) => !Number(headers.get("retry-after")
 // A plain spent quota limits only its own resource (search, core, graphql); anything else
 // (a secondary limit, a retry-after) is a penalty on the whole account.
 const isPrimary = (headers, body) => headers.get("x-ratelimit-remaining") === "0" && !Number(headers.get("retry-after")) && !/secondary rate limit/i.test(body);
-// Both paths of one account record penalties in one { until } object, so a penalty one
-// path hits holds the other too. `shared` returns it, or null while the login is unknown.
-const noShared = () => null;
-const extend = (shared, until) => { const p = shared(); if (p) p.until = Math.max(p.until, until); };
 
 export function limited(until, what = "search") {
   const at = new Date(Math.ceil(until / 60000) * 60000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
@@ -42,51 +38,69 @@ export function limited(until, what = "search") {
   return e;
 }
 
-// Other REST calls on one token are not paced, but a rate limit one of them hits is
-// remembered, so the next call (say the page retrying sign-in) waits it out, or fails
-// at once if it outlasts the patience, rather than sending into it and extending it.
-// A spent quota holds only its own resource (REST "core" and "graphql" are counted
-// apart); a secondary limit or retry-after holds every call on the token, and until a
-// call gets through again they go one at a time, so a call that wakes with the others
-// cannot send while the first one's answer is extending the pause. Only a call sent
-// after the latest such limit ends that; one already out when it hit proves nothing.
-export function apiGate({ patienceMs = PATIENCE_MS, log = () => {}, shared = noShared } = {}) {
-  const s = { blockedUntil: 0, resets: {}, strikes: 0, limited: false, probe: null, limits: 0 };
-  const pauseEnd = (resource) => Math.max(s.blockedUntil, s.resets[resource] || 0, shared()?.until || 0);
+// One GitHub account's penalty, kept once and used by every path that calls GitHub for
+// it (the search lane and the gate for other calls), so a penalty one path hits holds
+// them all. Until a call sent after the latest penalty gets through, calls go out one
+// at a time: a call that wakes with the others cannot send while the first one's answer
+// is extending the pause, and one already out when the penalty hit proves nothing.
+export function accountPenalty() {
+  const s = { until: 0, strikes: 0, recovering: false, probe: null, count: 0 };
+  return {
+    get until() { return s.until; },
+    get strikes() { return s.strikes; },
+    // Resolves once the call going out alone has its answer; null when none is.
+    get probe() { return s.probe; },
+    // Call right before sending; pass what it returns to settle() with the answer.
+    begin() {
+      const call = { since: s.count, done: null };
+      if (s.recovering) s.probe = new Promise((r) => (call.done = r));
+      return call;
+    },
+    // `wait` is null for an answer that is not a rate limit, a pause for one that is,
+    // and undefined when the call failed outright (that only ends its turn alone).
+    settle(call, wait, headers, body) {
+      if (wait === null && call.since === s.count) { s.strikes = 0; s.recovering = false; }
+      if (wait != null && !isPrimary(headers, body)) {
+        if (isSecondary(headers, body)) s.strikes++;
+        s.recovering = true; s.count++;
+        s.until = Math.max(s.until, Date.now() + wait);
+      }
+      if (call.done) { s.probe = null; call.done(); }
+    },
+  };
+}
+
+// Other REST calls are not paced, but a rate limit one of them hits is remembered, so
+// the next call (say the page retrying sign-in) waits it out, or fails at once if it
+// outlasts the patience, rather than sending into it and extending it. A spent quota
+// holds only its own resource (REST "core" and "graphql" are counted apart). `account`
+// returns the account's penalty record, or null while the login is unknown, when the
+// gate keeps one of its own.
+export function apiGate({ patienceMs = PATIENCE_MS, log = () => {}, account = () => null } = {}) {
+  const resets = {}, own = accountPenalty(), penalty = () => account() || own;
   return {
     async request(send, what, resource = "core") {
       const deadline = Date.now() + patienceMs;
       for (let tries = 1; ; tries++) {
         for (;;) {
-          const until = pauseEnd(resource);
+          const until = Math.max(penalty().until, resets[resource] || 0);
           if (until > deadline) throw limited(until, "API");
           if (until > Date.now()) await new Promise((r) => setTimeout(r, until - Date.now()));
-          else if (s.probe) await s.probe;
+          else if (penalty().probe) await penalty().probe;
           else break;
         }
-        let done;
-        const since = s.limits;
-        if (s.limited) s.probe = new Promise((r) => (done = r));
+        const p = penalty(), call = p.begin();
+        let res, body, wait;
         try {
-          const res = await send(), body = await res.text();
-          const spent = res.headers.get("x-ratelimit-remaining") === "0", reset = Number(res.headers.get("x-ratelimit-reset")) * 1000 || 0;
+          res = await send(); body = await res.text();
           // A spent quota holds its resource until it resets, however short a retry-after is.
-          if (spent) s.resets[resource] = Math.max(s.resets[resource] || 0, reset);
-          const wait = rateLimitWait(res.status, res.headers, body, s.strikes);
-          if (wait === null) {
-            if (since === s.limits) { s.strikes = 0; s.limited = false; }
-            return { res, body };
-          }
-          if (isPrimary(res.headers, body)) s.resets[resource] = Math.max(s.resets[resource] || 0, Date.now() + wait);
-          else {
-            if (isSecondary(res.headers, body)) s.strikes++;
-            s.limited = true; s.limits++;
-            s.blockedUntil = Math.max(s.blockedUntil, Date.now() + wait);
-            extend(shared, s.blockedUntil);
-          }
-          log(`rate limit (${res.status}) on ${what}: waiting ${Math.round(wait / 1000)}s`);
-        } finally { if (done) { s.probe = null; done(); } }
-        if (tries >= LIMITED_TRIES) throw limited(pauseEnd(resource), "API");
+          if (res.headers.get("x-ratelimit-remaining") === "0") resets[resource] = Math.max(resets[resource] || 0, Number(res.headers.get("x-ratelimit-reset")) * 1000 || 0);
+          wait = rateLimitWait(res.status, res.headers, body, p.strikes);
+          if (wait !== null && isPrimary(res.headers, body)) resets[resource] = Math.max(resets[resource] || 0, Date.now() + wait);
+        } finally { p.settle(call, wait, res?.headers, body); }
+        if (wait === null) return { res, body };
+        log(`rate limit (${res.status}) on ${what}: waiting ${Math.round(wait / 1000)}s`);
+        if (tries >= LIMITED_TRIES) throw limited(Math.max(penalty().until, resets[resource] || 0), "API");
       }
     },
   };
@@ -94,22 +108,24 @@ export function apiGate({ patienceMs = PATIENCE_MS, log = () => {}, shared = noS
 
 // `prio` is a shared { background } object rather than a flag, so a page request that
 // joins a background fetch can promote it while it is still queued.
-export function searchLane({ gapMs = SEARCH_GAP_MS, patienceMs = PATIENCE_MS, reserve = RESERVE, log = () => {}, shared = noShared } = {}) {
-  const s = { remaining: Infinity, reset: 0, blockedUntil: 0, strikes: 0, last: -Infinity, busy: false, users: 0, queue: [], timer: null };
-  // When a waiter could next send: after any rate-limit pause, and after the quota resets
-  // if it is spent (or, for background work, down to the reserve).
-  const pauseEnd = (prio) => Math.max(s.blockedUntil, shared()?.until || 0, s.remaining <= (prio.background ? reserve : 0) ? s.reset : 0);
-  // A waiter whose patience the pause outlasts fails now rather than hanging the queue.
-  // Checked on every turn, since the other path can extend a shared penalty at any time.
+export function searchLane({ gapMs = SEARCH_GAP_MS, patienceMs = PATIENCE_MS, reserve = RESERVE, log = () => {}, penalty = accountPenalty() } = {}) {
+  const s = { remaining: Infinity, reset: 0, blockedUntil: 0, last: -Infinity, busy: false, users: 0, queue: [], timer: null };
+  // When a waiter could next send: after the account's penalty and any spent search
+  // quota pause, and after the quota resets if it is spent (or, for background work,
+  // down to the reserve).
+  const pauseEnd = (prio) => Math.max(s.blockedUntil, penalty.until, s.remaining <= (prio.background ? reserve : 0) ? s.reset : 0);
   function pump() {
     clearTimeout(s.timer); s.timer = null;
     if (s.busy) return;
+    // A waiter whose patience the pause outlasts fails now rather than hanging the queue.
+    // Checked on every turn, since another path can extend the penalty at any time.
     for (const w of s.queue.filter((w) => pauseEnd(w.prio) > w.deadline)) { s.queue.splice(s.queue.indexOf(w), 1); w.fail(limited(pauseEnd(w.prio))); }
     const next = s.queue.find((w) => !w.prio.background) || (s.users ? null : s.queue[0]);
     if (!next) return;
     const now = Date.now();
     const at = Math.max(s.last + gapMs, pauseEnd(next.prio));
     if (at > now) { s.timer = setTimeout(pump, at - now); return; }
+    if (penalty.probe) { penalty.probe.then(pump); return; } // another path's call is going out alone
     s.queue.splice(s.queue.indexOf(next), 1);
     s.busy = true; s.last = now;
     next.go();
@@ -129,19 +145,17 @@ export function searchLane({ gapMs = SEARCH_GAP_MS, patienceMs = PATIENCE_MS, re
       for (let tries = 1; ; tries++) {
         if (pauseEnd(prio) > deadline) throw limited(pauseEnd(prio));
         await new Promise((go, fail) => { s.queue.push({ prio, deadline, go, fail }); pump(); });
+        const call = penalty.begin();
         let res, body, wait;
         try {
           res = await send(); body = await res.text();
-          wait = rateLimitWait(res.status, res.headers, body, s.strikes);
-          if (wait === null) s.strikes = 0;
-          else {
-            if (isSecondary(res.headers, body)) s.strikes++;
-            s.blockedUntil = Math.max(s.blockedUntil, Date.now() + wait);
-            if (!isPrimary(res.headers, body)) extend(shared, s.blockedUntil);
+          wait = rateLimitWait(res.status, res.headers, body, penalty.strikes);
+          if (wait !== null) {
+            if (isPrimary(res.headers, body)) s.blockedUntil = Math.max(s.blockedUntil, Date.now() + wait);
             const left = res.headers.get("x-ratelimit-remaining");
             log(`search rate limit (${res.status}${left == null ? "" : `, ${left} left`}${/secondary/i.test(body) ? ", secondary" : ""}): pausing searches ${Math.round(wait / 1000)}s`);
           }
-        } finally { release(res); }
+        } finally { penalty.settle(call, wait, res?.headers, body); release(res); }
         if (wait === null) return { res, body };
         if (tries >= LIMITED_TRIES) throw limited(pauseEnd(prio));
       }

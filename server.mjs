@@ -5,7 +5,7 @@ import crypto from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { demoDaily, demoLive, demoRepos } from "./demo.mjs";
-import { searchLane, apiGate } from "./ratelimit.mjs";
+import { createGitHub } from "./github.mjs";
 import { createActivity, API, daysBetween, shift, today } from "./activity.mjs";
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -22,46 +22,8 @@ fs.mkdirSync(CACHE_DIR, { recursive: true });
 let ownerToken = "";
 try { ownerToken = execFileSync("gh", ["auth", "token"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim(); } catch {}
 
-// ---------- per-token GitHub client with rate-limit awareness ----------
-// REST searches share one paced lane per GitHub login (ratelimit.mjs), since GitHub
-// limits the account, not the token; other calls go through a per-token gate that
-// remembers a rate limit and holds later calls until it ends.
-// A secondary limit or retry-after penalises the whole account, so both paths share
-// one record of it per login.
-const lanes = new Map(), penalties = new Map();
-function penaltyFor(login) {
-  if (!penalties.has(login)) penalties.set(login, { until: 0 });
-  return penalties.get(login);
-}
-function laneFor(login) {
-  if (!lanes.has(login)) lanes.set(login, searchLane({ log: (m) => console.log(`[${login}] ${m}`), shared: () => penaltyFor(login) }));
-  return lanes.get(login);
-}
-const clients = new Map();
-function client(token) {
-  if (clients.has(token)) return clients.get(token);
-  const c = {
-    headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "github-dashboard-local" },
-    login: null,
-    gate: apiGate({ log: (m) => console.log(`[${c.login || "?"}] ${m}`), shared: () => (c.login ? penaltyFor(c.login) : null) }),
-    async gh(url, init = {}, prio = { background: false }) {
-      const send = () => fetch(url, { ...init, headers: { ...c.headers, ...(init.headers || {}) } });
-      const { pathname } = new URL(url);
-      const { res, body } = pathname.startsWith("/search/") ? await laneFor(await c.me()).request(send, prio) : await c.gate.request(send, pathname, pathname === "/graphql" ? "graphql" : "core");
-      if (res.status === 401) { const e = new Error("GitHub rejected the token"); e.code = 401; throw e; }
-      if (!res.ok) { const e = new Error(`${res.status} ${res.statusText}: ${body}`); e.status = res.status; throw e; }
-      return JSON.parse(body);
-    },
-    async me() { if (!c.login) c.login = (await c.gh(`${API}/user`)).login; return c.login; },
-    async graphql(query, variables) {
-      const r = await c.gh(`${API}/graphql`, { method: "POST", body: JSON.stringify({ query, variables }) });
-      if (r.errors) throw new Error(JSON.stringify(r.errors));
-      return r.data;
-    },
-  };
-  clients.set(token, c);
-  return c;
-}
+// ---------- per-token GitHub clients (github.mjs) ----------
+const { client, laneFor } = createGitHub({ log: (m) => console.log(m) });
 
 // ---------- sessions ----------
 let sessions = {};
