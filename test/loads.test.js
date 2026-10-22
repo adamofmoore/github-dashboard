@@ -46,3 +46,18 @@ test("a failed refresh is not reused, and a newer refresh replaces an older one"
   s.load("a", false);
   assert.equal(s.asked.length, 3, "after it fails, a plain load asks on its own");
 });
+
+test("regression: refreshes of two ranges are tracked apart, so going back to the first joins its refresh", async () => {
+  // Copilot's case: Refresh range A, pick and refresh range B, then go back to A before
+  // either finishes. The plain load of A must wait for A's refresh, not ask again.
+  const s = server();
+  const a = s.load("a", true);
+  s.load("b", true);
+  assert.equal(s.load("a", false), a, "back on A, the load joins A's refresh");
+  assert.equal(s.asked.length, 2, "no third request");
+  s.asked[1].resolve({});
+  await new Promise((r) => setImmediate(r));
+  assert.equal(s.load("a", false), a, "B finishing doesn't forget A");
+  s.load("b", false);
+  assert.deepEqual(s.asked.map((x) => [x.key, x.force]).at(-1), ["b", false], "while B, finished, asks on its own");
+});

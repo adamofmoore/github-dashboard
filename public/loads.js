@@ -9,14 +9,13 @@
   if (typeof module === "object" && module.exports) module.exports = api; else root.Loads = api;
 })(this, function () {
   function refreshSharing(fetch) {
-    let refreshing = null; // { key, answer } for the forced refresh in flight
+    const refreshing = new Map(); // range -> the newest forced refresh of it still in flight
     return function load(key, force) {
-      if (!force && refreshing?.key === key) return refreshing.answer;
+      if (!force && refreshing.has(key)) return refreshing.get(key);
       const answer = fetch(key, force);
       if (force) {
-        const mine = { key, answer };
-        refreshing = mine;
-        answer.then(() => {}, () => {}).then(() => { if (refreshing === mine) refreshing = null; });
+        refreshing.set(key, answer);
+        answer.then(() => {}, () => {}).then(() => { if (refreshing.get(key) === answer) refreshing.delete(key); });
       }
       return answer;
     };
