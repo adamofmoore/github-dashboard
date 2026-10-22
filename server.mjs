@@ -6,6 +6,7 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { demoDaily, demoLive, demoRepos } from "./demo.mjs";
 import { searchLane, rateLimitWait, limited, PATIENCE_MS } from "./ratelimit.mjs";
+import { firstPage, restPages } from "./search.mjs";
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 4747);
@@ -60,7 +61,7 @@ function client(token) {
         await sleep(wait);
       }
       if (res.status === 401) { const e = new Error("GitHub rejected the token"); e.code = 401; throw e; }
-      if (!res.ok) throw new Error(`${res.status} ${res.statusText}: ${body}`);
+      if (!res.ok) { const e = new Error(`${res.status} ${res.statusText}: ${body}`); e.status = res.status; throw e; }
       return JSON.parse(body);
     },
     async me() { if (!c.login) c.login = (await c.gh(`${API}/user`)).login; return c.login; },
@@ -126,18 +127,31 @@ const METRICS = {
 function slim(i) {
   return { repo: i.repository_url.replace(`${API}/repos/`, ""), number: i.number, title: i.title, url: i.html_url, state: i.state, state_reason: i.state_reason || null, draft: i.draft || false, created_at: i.created_at, closed_at: i.closed_at, merged_at: i.pull_request?.merged_at || null, is_pr: Boolean(i.pull_request) };
 }
-async function searchRange(c, metric, fromKey, toKey, user, prio) {
+// Whether any of a few items we already had still belongs in this metric's range, read
+// from the issue itself rather than through search.
+async function stillInRange(c, metric, user, known, fromKey, toKey) {
+  for (const item of known.slice(0, 3)) {
+    let i;
+    try { i = await c.gh(`${API}/repos/${item.repo}/issues/${item.number}`); }
+    catch (e) { if (e.status === 404 || e.status === 410) continue; throw e; }
+    const ts = METRICS[metric].ts(i), who = metric === "issuesClosed" ? (i.assignees || []).map((a) => a.login) : [i.user?.login];
+    if (ts && Boolean(i.pull_request) === item.is_pr && who.includes(user) && localDay(ts) >= fromKey && localDay(ts) <= toKey) return true;
+  }
+  return false;
+}
+// `known` is what the cache already holds for the range, each item tagged with its day.
+async function searchRange(c, metric, fromKey, toKey, user, prio, known = []) {
   const m = METRICS[metric];
   const q = `${m.q(user)} ${m.field}:${offsetIso(startOfDay(fromKey))}..${offsetIso(endOfDay(toKey))}`;
-  const first = await c.gh(`${API}/search/issues?q=${encodeURIComponent(q)}&per_page=100&page=1`, {}, prio);
+  const page = (p) => c.gh(`${API}/search/issues?q=${encodeURIComponent(q)}&per_page=100&page=${p}`, {}, prio);
+  const label = `${metric} ${fromKey}..${toKey}`;
+  const first = await firstPage(page, known.length ? () => stillInRange(c, metric, user, known, fromKey, toKey) : null, label);
   if (first.total_count > 1000 && fromKey !== toKey) {
     const days = daysBetween(fromKey, toKey), mid = days[Math.floor(days.length / 2) - 1], next = days[Math.floor(days.length / 2)];
-    const [a, b] = await Promise.all([searchRange(c, metric, fromKey, mid, user, prio), searchRange(c, metric, next, toKey, user, prio)]);
+    const [a, b] = await Promise.all([searchRange(c, metric, fromKey, mid, user, prio, known.filter((i) => i.day <= mid)), searchRange(c, metric, next, toKey, user, prio, known.filter((i) => i.day >= next))]);
     return a.concat(b);
   }
-  let items = first.items;
-  const pages = Math.min(10, Math.ceil(first.total_count / 100));
-  for (let p = 2; p <= pages; p++) items = items.concat((await c.gh(`${API}/search/issues?q=${encodeURIComponent(q)}&per_page=100&page=${p}`, {}, prio)).items);
+  const items = await restPages(page, first, label);
   const buckets = {};
   for (const k of daysBetween(fromKey, toKey)) buckets[k] = [];
   for (const it of items) { const ts = m.ts(it); if (!ts) continue; const k = localDay(ts); if (buckets[k]) buckets[k].push(slim(it)); }
@@ -175,7 +189,10 @@ async function dailyData(c, fromKey, toKey, force, background = false) {
     for (const d of missing) { const last = spans[spans.length - 1]; if (last && daysBetween(last[1], d).length === 2) last[1] = d; else spans.push([d, d]); }
     await Promise.all(spans.map(async ([a, b]) => {
       const key = `${user}:${metric}:${a}:${b}`;
-      if (!inflight.has(key)) { const prio = { background }; inflight.set(key, { prio, done: searchRange(c, metric, a, b, user, prio).finally(() => inflight.delete(key)) }); }
+      if (!inflight.has(key)) {
+        const prio = { background }, known = daysBetween(a, b).flatMap((d) => (cache.data[`${metric}:${d}`] || []).map((i) => ({ ...i, day: d })));
+        inflight.set(key, { prio, done: searchRange(c, metric, a, b, user, prio, known).finally(() => inflight.delete(key)) });
+      }
       // Background searches yield to page requests, so a page request awaiting a fetch the
       // warm loop started has to take it over, or each would wait on the other forever.
       const job = inflight.get(key);
