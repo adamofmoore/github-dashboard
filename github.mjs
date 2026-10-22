@@ -5,6 +5,7 @@
 // both paths share one penalty record per login.
 import { searchLane, apiGate, accountPenalty } from "./ratelimit.mjs";
 import { API } from "./activity.mjs";
+import { graphqlError } from "./live-search.mjs";
 
 export function createGitHub({ fetch = globalThis.fetch, log = () => {} } = {}) {
   const lanes = new Map(), penalties = new Map(), clients = new Map();
@@ -40,7 +41,7 @@ export function createGitHub({ fetch = globalThis.fetch, log = () => {} } = {}) 
       },
       async graphql(query, variables) {
         const r = await c.gh(`${API}/graphql`, { method: "POST", body: JSON.stringify({ query, variables }) });
-        if (r.errors) throw new Error(JSON.stringify(r.errors));
+        if (r.errors) throw graphqlError(r.errors);
         return r.data;
       },
     };

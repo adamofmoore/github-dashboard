@@ -4,6 +4,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { createLiveSearch } from "./live-search.mjs";
 import { demoDaily, demoLive, demoRepos } from "./demo.mjs";
 import { createGitHub } from "./github.mjs";
 import { createActivity, API, daysBetween, shift, today } from "./activity.mjs";
@@ -86,15 +87,17 @@ function cacheFor(login) {
 const { dailyData } = createActivity({ cacheFor, laneFor, log: (m) => console.log(m) });
 
 // ---------- live (GraphQL) ----------
+// Page size, retries and completeness checks live in live-search.mjs. The explicit sort
+// gives every page the same order, so the offset cursors cannot skip or repeat a result.
+// One per client, i.e. per token: two tokens for the same login can see different repos,
+// so neither a shared in-flight fetch nor the remembered counts may cross between them.
+const liveSearches = new WeakMap();
 async function searchAll(c, q, fragment) {
-  const nodes = []; let after = null;
-  for (let i = 0; i < 10; i++) {
-    const data = await c.graphql(`query($q:String!,$after:String){ search(query:$q,type:ISSUE,first:100,after:$after){ issueCount pageInfo{hasNextPage endCursor} nodes{ ${fragment} } } }`, { q, after });
-    nodes.push(...data.search.nodes.filter((n) => n && n.number));
-    if (!data.search.pageInfo.hasNextPage) break;
-    after = data.search.pageInfo.endCursor;
-  }
-  return nodes;
+  const query = `query($q:String!,$first:Int!,$after:String){ search(query:$q,type:ISSUE,first:$first,after:$after){ issueCount pageInfo{hasNextPage endCursor} nodes{ ${fragment} } } }`;
+  const sorted = `${q} sort:created-desc`;
+  if (!liveSearches.has(c)) liveSearches.set(c, createLiveSearch());
+  return liveSearches.get(c)(sorted, async (after, first) => (await c.graphql(query, { q: sorted, first, after })).search,
+    { q: sorted, log: (msg) => console.log(`[${c.login || "?"}] live search "${sorted}": ${msg}`) });
 }
 const ISSUE_FRAG = `... on Issue { number title url createdAt updatedAt bodyText comments{ totalCount } repository{ nameWithOwner } labels(first:10){ nodes{ name color } } milestone{ title }
   linkedPrs: closedByPullRequestsReferences(first:10, includeClosedPrs:false){ nodes{ number title url isDraft state repository{ nameWithOwner } } } }`;
