@@ -8,15 +8,19 @@ import { createLiveSearch } from "./live-search.mjs";
 import { demoDaily, demoLive, demoRepos } from "./demo.mjs";
 import { createGitHub } from "./github.mjs";
 import { createRepoScanner } from "./repos.mjs";
+import Dates from "./public/dates.js";
 import { createActivity, API, daysBetween, shift, today } from "./activity.mjs";
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
+const { MAX_RANGE_DAYS } = Dates;
 const PORT = Number(process.env.PORT || 4747);
 const HOST = process.env.HOST || "127.0.0.1";
 const CLIENT_ID = process.env.GITHUB_CLIENT_ID || "";
 const CACHE_DIR = path.join(ROOT, "cache");
 const SESSIONS_FILE = path.join(CACHE_DIR, "sessions.json");
-const WARM_DAYS = 90;
+// Kept warm in the background, so the Custom tile's longest quick pick (Past year)
+// loads from the cache rather than hundreds of rate-limited searches.
+const WARM_DAYS = MAX_RANGE_DAYS;
 const DEMO = process.env.DEMO === "1";
 fs.mkdirSync(CACHE_DIR, { recursive: true });
 
@@ -154,9 +158,10 @@ async function warm() {
   for (const token of tokens) {
     const c = client(token);
     // The two passes fail independently, so a refused yesterday..today refresh still lets
-    // the 90-day pass fill in whatever is missing.
+    // the warm pass fill in whatever is missing. Filling a year from empty takes several
+    // passes; each saves what it got.
     const t = today();
-    for (const [from, force, what] of [[shift(t, -1), true, "refresh"], [shift(t, -(WARM_DAYS - 1)), false, "90-day warm"]]) {
+    for (const [from, force, what] of [[shift(t, -1), true, "refresh"], [shift(t, -(WARM_DAYS - 1)), false, `${WARM_DAYS}-day warm`]]) {
       try { await dailyData(c, from, t, force, true); }
       catch (e) { console.error(`${what} failed for ${c.login || "?"}:`, e.message); }
     }
@@ -227,7 +232,7 @@ const server = http.createServer(async (req, res) => {
       if (url.pathname === "/api/daily") {
         const to = url.searchParams.get("to") || today(), from = url.searchParams.get("from") || to;
         if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) || from > to) return send(res, 400, { error: "bad range" });
-        if (daysBetween(from, to).length > 366) return send(res, 400, { error: "range over 366 days" });
+        if (daysBetween(from, to).length > MAX_RANGE_DAYS) return send(res, 400, { error: `range over ${MAX_RANGE_DAYS} days` });
         return send(res, 200, await laneFor(await c.me()).whileUser(() => dailyData(c, from, to, url.searchParams.get("force") === "1")));
       }
       return send(res, 404, { error: "not found" });

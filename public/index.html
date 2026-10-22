@@ -88,6 +88,8 @@ section > header .sub { font-size:12.5px; color:var(--muted) }
 .tile[aria-pressed=true] { border-color:var(--accent); box-shadow:0 0 0 1px var(--accent) inset }
 .tile .label { display:flex; align-items:baseline; justify-content:space-between; gap:8px; font-size:13px; font-weight:600; color:var(--ink) }
 .tile .label em { font-style:normal; font-weight:400; font-size:11.5px; color:var(--muted); white-space:nowrap }
+.tile .preset { font:inherit; font-weight:600; color:inherit; background:transparent; border:0; padding:0 2px 0 0; margin:0; cursor:pointer; max-width:60% }
+.tile .preset:focus-visible { outline:2px solid var(--focus); outline-offset:2px; border-radius:3px }
 .tile .dates { display:flex; align-items:center; gap:6px; font-size:11.5px; color:var(--muted) }
 .tile .datelink { position:relative } .tile .datelink a { color:var(--accent-ink); text-decoration:underline; text-decoration-color:transparent; text-underline-offset:2px } .tile .datelink a:hover { text-decoration-color:currentColor }
 .tile .datelink input[type=date] { position:absolute; left:0; top:100%; width:1px; height:1px; opacity:0; pointer-events:none; border:0; padding:0 }
@@ -331,6 +333,9 @@ const savedSelection = store.get("selectedRepos", legacyExcluded.size ? store.ge
 let selectedRepos = savedSelection === null ? null : new Set(savedSelection.map((r) => r.toLowerCase()));
 const saveRepos = () => store.set("selectedRepos", selectedRepos === null ? null : [...selectedRepos]);
 let customRange = store.get("customRange", { from: shift(today(), -6), to: today() });
+// A quick pick (dates.js PRESETS) rolls with today; null means the fixed dates above.
+let customPreset = store.get("customPreset", null);
+const customWindow = () => (customPreset && Dates.presetRange(customPreset, today())) || customRange;
 let activeTile = store.get("activeTile", "7d");
 if (activeTile === "range") activeTile = "custom";
 let winOnly = store.get("winOnly", { issues: false, prs: false });
@@ -388,7 +393,7 @@ function currentRange() {
   if (activeTile === "yesterday") { const y = prevDay(t); return { from: y, to: y }; }
   if (activeTile === "7d") return { from: shift(t,-6), to: t };
   if (activeTile === "30d") return { from: shift(t,-29), to: t };
-  return customRange;
+  return customWindow();
 }
 function fetchRange() {
   const r = currentRange(); const t = today();
@@ -505,7 +510,13 @@ function itemsIn(metric, from, to) {
 }
 function windowFor(id) {
   const t = today(); const y = prevDay(t);
-  return { today:[t,t], yesterday:[y,y], "7d":[shift(t,-6),t], "30d":[shift(t,-29),t], custom:[customRange.from, customRange.to] }[id];
+  return { today:[t,t], yesterday:[y,y], "7d":[shift(t,-6),t], "30d":[shift(t,-29),t], custom:[customWindow().from, customWindow().to] }[id];
+}
+// A range reaching into another year names the year on both ends, or "Oct 23 to Oct 22" reads as one day short of empty.
+const fmtRangeDay = (k, other) => (k.slice(0, 4) === other.slice(0, 4) ? fmtDay(k) : `${fmtDay(k)}, ${k.slice(0, 4)}`);
+function presetSelect() {
+  const opt = (v, text) => `<option value="${v}"${(customPreset || "dates") === v ? " selected" : ""}>${text}</option>`;
+  return `<select class="preset" id="preset" aria-label="Custom range">${Dates.PRESETS.map(([id, text]) => opt(id, text)).join("")}${opt("dates", "Custom dates")}</select>`;
 }
 function renderDaily() {
   if (!daily) return;
@@ -514,16 +525,22 @@ function renderDaily() {
   $("#workWeek").checked = workWeek;
   $("#tiles").innerHTML = windows.map(([id, label]) => { const [from, to] = windowFor(id); const days = daysBetween(from, to), nDays = days.length, divDays = workWeek ? days.filter(isWorkDay).length : nDays;
     const dates = "";
-    const customMeta = `<span class="datelink"><a href="#" data-pick="from">${fmtDay(from)}</a> to <a href="#" data-pick="to">${fmtDay(to)}</a><input type="date" id="from" value="${from}" max="${today()}" aria-label="From" tabindex="-1"><input type="date" id="to" value="${to}" max="${today()}" aria-label="To" tabindex="-1"></span>`;
+    const customMeta = `<span class="datelink"><a href="#" data-pick="from">${fmtRangeDay(from, to)}</a> to <a href="#" data-pick="to">${fmtRangeDay(to, from)}</a><input type="date" id="from" value="${from}" max="${today()}" aria-label="From" tabindex="-1"><input type="date" id="to" value="${to}" max="${today()}" aria-label="To" tabindex="-1"></span>`;
     return `<div class="tile${id === "custom" ? " custom" : ""}" role="button" tabindex="0" data-tile="${id}" aria-pressed="${activeTile === id}">
-    <div class="label"><span class="lt">${label}</span><em>${id === "custom" ? customMeta + (workWeek && nDays > 1 ? ` · ${divDays} work day${divDays === 1 ? "" : "s"}` : "") : nDays > 1 ? (workWeek ? `${divDays} work day${divDays === 1 ? "" : "s"}` : `${nDays} days`) : fmtDay(from)}</em></div>${dates}
+    <div class="label">${id === "custom" ? presetSelect() : `<span class="lt">${label}</span>`}<em>${id === "custom" ? customMeta + (workWeek && nDays > 1 ? ` · ${divDays} work day${divDays === 1 ? "" : "s"}` : "") : nDays > 1 ? (workWeek ? `${divDays} work day${divDays === 1 ? "" : "s"}` : `${nDays} days`) : fmtDay(from)}</em></div>${dates}
     <div class="nums">${SERIES.map(([m, , col, short]) => { const n = countIn(m, from, to); let tail = "&nbsp;", cls = "";
       if (nDays > 1) tail = divDays ? `${fmtAvg(n / divDays)}<em>/day</em>` : `<em>no work days</em>`;
       else { const pd = prevDay(from), prev = countIn(m, pd, pd), d = n - prev; cls = d > 0 ? "up" : d < 0 ? "down" : "flat"; tail = `${d > 0 ? "+" : d < 0 ? "−" : "±"}${Math.abs(d)}<em> ${pd === shift(from, -1) ? "yday" : "prev"}</em>`; }
       return `<div class="n"><b>${n}</b><span>${short}</span><span class="avg ${cls}">${tail}</span></div>`; }).join("")}</div></div>`; }).join("");
   const pick = (id) => { if (activeTile === id) return; activeTile = id; store.set("activeTile", activeTile); loadDaily(); };
-  document.querySelectorAll(".tile").forEach((b) => { b.onclick = (e) => { if (e.target.closest(".dates, .datelink")) return; pick(b.dataset.tile); }; b.onkeydown = (e) => { if ((e.key === "Enter" || e.key === " ") && !e.target.closest(".dates")) { e.preventDefault(); pick(b.dataset.tile); } }; });
-  const applyDates = () => { const f = $("#from").value, t = $("#to").value; if (!f || !t) return; customRange = f <= t ? { from: f, to: t } : { from: t, to: f }; store.set("customRange", customRange); activeTile = "custom"; store.set("activeTile", activeTile); loadDaily(); };
+  document.querySelectorAll(".tile").forEach((b) => { b.onclick = (e) => { if (e.target.closest(".dates, .datelink, .preset")) return; pick(b.dataset.tile); }; b.onkeydown = (e) => { if ((e.key === "Enter" || e.key === " ") && !e.target.closest(".dates, .preset")) { e.preventDefault(); pick(b.dataset.tile); } }; });
+  const useCustom = () => { store.set("customPreset", customPreset); store.set("customRange", customRange); activeTile = "custom"; store.set("activeTile", activeTile); loadDaily(); };
+  const applyDates = () => { const f = $("#from").value, t = $("#to").value; if (!f || !t) return; customRange = f <= t ? { from: f, to: t } : { from: t, to: f }; customPreset = null; useCustom(); };
+  // Choosing "Custom dates" keeps the range on screen, now fixed, and opens the picker to change it.
+  $("#preset").onchange = (e) => {
+    if (e.target.value === "dates") { customRange = customWindow(); customPreset = null; useCustom(); const inp = $("#from"); if (inp?.showPicker) inp.showPicker(); return; }
+    customPreset = e.target.value; useCustom();
+  };
   $("#from").onchange = $("#to").onchange = applyDates;
   document.querySelectorAll(".datelink a").forEach((a) => a.onclick = (e) => { e.preventDefault(); e.stopPropagation(); const inp = $("#" + a.dataset.pick); if (inp.showPicker) inp.showPicker(); else inp.focus(); });
   drawChart(r.from, r.to);

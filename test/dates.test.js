@@ -63,3 +63,40 @@ test("the fetched window always covers the day a tile compares against", () => {
     today = shift(today, 1);
   }
 });
+
+// ---------- Custom tile quick picks ----------
+const { PRESETS, presetRange, addMonths, MAX_RANGE_DAYS } = require("../public/dates.js");
+const range = (id, t) => { const r = presetRange(id, t); return `${r.from}..${r.to}`; };
+
+test("each quick pick is a rolling range ending today, except last month", () => {
+  const T = "2026-10-22";
+  assert.equal(range("14d", T), "2026-10-09..2026-10-22", "14 days, today included");
+  assert.equal(range("thisMonth", T), "2026-10-01..2026-10-22");
+  assert.equal(range("lastMonth", T), "2026-09-01..2026-09-30");
+  assert.equal(range("3m", T), "2026-07-23..2026-10-22");
+  assert.equal(range("6m", T), "2026-04-23..2026-10-22");
+  assert.equal(range("thisYear", T), "2026-01-01..2026-10-22");
+  assert.equal(range("1y", T), "2025-10-23..2026-10-22");
+  assert.equal(daysBetween(...range("1y", T).split("..")).length, 365);
+  assert.equal(presetRange("nope", T), null);
+});
+
+test("quick picks cross year ends and short months correctly", () => {
+  assert.equal(range("lastMonth", "2026-01-15"), "2025-12-01..2025-12-31");
+  assert.equal(range("lastMonth", "2024-03-31"), "2024-02-01..2024-02-29", "leap February");
+  assert.equal(range("3m", "2026-05-31"), "2026-03-01..2026-05-31", "Feb has no 31st: back to Feb 28, then the day after");
+  assert.equal(addMonths("2026-03-31", -1), "2026-02-28");
+  assert.equal(range("thisMonth", "2026-10-01"), "2026-10-01..2026-10-01", "the 1st is a one-day month so far");
+  assert.equal(range("1y", "2024-02-29"), "2023-03-01..2024-02-29");
+});
+
+test("no quick pick duplicates a fixed tile, and every one fits a server request, leap years included", () => {
+  for (const T of ["2026-10-22", "2024-02-29"]) {
+  const fixed = new Set([1, 7, 30].map((n) => `${shift(T, 1 - n)}..${T}`));
+  for (const [id] of PRESETS) {
+    assert.ok(!fixed.has(range(id, T)), `${id} repeats a fixed tile`);
+    // fetchRange reaches up to four days below the window for the work-week baseline.
+    assert.ok(daysBetween(...range(id, T).split("..")).length + 4 <= MAX_RANGE_DAYS, `${id} is too long to fetch`);
+  }
+  }
+});
