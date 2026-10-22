@@ -106,6 +106,16 @@ test("an empty later page is the real end when a fresh first page shows the resu
   assert.deepEqual(s.asked, [1, 2, 1]);
 });
 
+test("regression: when results shrink mid-paging, the pages already read are dropped and paging restarts", async () => {
+  // Copilot's case: 250 results, page 3 comes back empty, and a fresh first page says 120.
+  // Keeping pages 1-2 would save 200 items, some no longer matching.
+  const s = search({ 1: [results(250, 100, 0), results(120, 100, 1000)], 2: [results(250, 100, 100), results(120, 20, 1100)], 3: [EMPTY] });
+  const items = await restPages(s.page, await s.page(1), "issuesClosed");
+  assert.equal(items.length, 120);
+  assert.ok(items.every((i) => i.id >= 1000), "only items from the fresh pages");
+  assert.deepEqual(s.asked, [1, 2, 3, 1, 2]);
+});
+
 test("a false empty first page during the shrink check does not end paging early", async () => {
   const s = search({ 1: [results(250), EMPTY, results(250)], 2: [EMPTY, results(250, 100, 100)], 3: [results(250, 50, 200)] });
   const items = await restPages(s.page, await s.page(1), "x");

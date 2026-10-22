@@ -87,6 +87,8 @@ test("when more items are cached than are read, an empty answer does not wipe th
   const r = await d.dailyData(d.c, CLOSED_DAY, CLOSED_DAY, true, true);
   assert.equal(r.metrics.issuesClosed[CLOSED_DAY], before);
   assert.equal(d.cache.data[k], before);
+  assert.deepEqual(r.pending, [k], "and says these saved counts await confirmation");
+  assert.deepEqual(r.stale, [], "which is not the same as search provably answering wrong");
 });
 
 test("an empty answer nothing can check settles a past day only when one CONFIRM_MS later agrees", async (t) => {

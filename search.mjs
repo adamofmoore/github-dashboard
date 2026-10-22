@@ -37,16 +37,20 @@ export async function firstPage(page, stillThere, label) {
 
 // The rest of the pages, up to GitHub's 1000-result cap. A later page that comes back
 // empty while the first promised more is the same glitch and is asked again, unless a
-// fresh first page shows the results really shrank below it.
+// fresh first page shows the results really shrank below it; then the pages already
+// read are out of date, so paging starts over from that fresh first page.
 export async function restPages(page, first, label) {
-  let items = first.items;
-  const pages = Math.min(10, Math.ceil(first.total_count / 100));
-  pages: for (let p = 2; p <= pages; p++) {
+  let items = first.items, pages = Math.min(10, Math.ceil(first.total_count / 100)), restarts = 0;
+  for (let p = 2; p <= pages; p++) {
     for (let tries = 1; ; tries++) {
       const r = await complete(page, p, label);
       if (r.items.length) { items = items.concat(r.items); break; }
       const now = await complete(page, 1, label);
-      if (now.total_count && Math.ceil(now.total_count / 100) < p) break pages;
+      if (now.total_count && Math.ceil(now.total_count / 100) < p) {
+        if (++restarts > EMPTY_TRIES) throw unreliable(`GitHub search kept shrinking while paging for ${label}`);
+        items = now.items; pages = Math.min(10, Math.ceil(now.total_count / 100)); p = 1;
+        break;
+      }
       if (tries >= EMPTY_TRIES) throw unreliable(`GitHub search answered page ${p} of ${pages} with nothing ${EMPTY_TRIES} times for ${label}`);
     }
   }

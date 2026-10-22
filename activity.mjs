@@ -84,7 +84,7 @@ export function createActivity({ cacheFor, laneFor, log = () => {} }) {
   async function dailyData(c, fromKey, toKey, force, background = false) {
     const user = await c.me();
     const cache = cacheFor(user), lane = laneFor(user);
-    const tKey = today(), days = daysBetween(fromKey, toKey), out = {}, stale = [];
+    const tKey = today(), days = daysBetween(fromKey, toKey), out = {}, stale = [], pending = [];
     for (const metric of Object.keys(METRICS)) {
       out[metric] = {};
       // A past day is reusable only once it was fetched after it ended — otherwise a
@@ -121,7 +121,11 @@ export function createActivity({ cacheFor, laneFor, log = () => {} }) {
             // earlier settled empty counts as that answer. Until then it keeps what it had,
             // minus its fresh stamp, so later loads come back to confirm it.
             const prior = cache.emptyAt[k] ?? (cache.fetchedAt[k] && cache.data[k]?.length === 0 ? cache.fetchedAt[k] : undefined);
-            if (prior === undefined || Date.now() - prior < CONFIRM_MS) { cache.emptyAt[k] = prior ?? Date.now(); delete cache.fetchedAt[k]; out[metric][day] = cache.data[k] || []; continue; }
+            if (prior === undefined || Date.now() - prior < CONFIRM_MS) {
+              cache.emptyAt[k] = prior ?? Date.now(); delete cache.fetchedAt[k]; out[metric][day] = cache.data[k] || [];
+              if (out[metric][day].length) pending.push(k); // showing saved items that may be gone
+              continue;
+            }
           }
           delete cache.emptyAt[k];
           cache.data[k] = items; cache.fetchedAt[k] = Date.now(); out[metric][day] = items;
@@ -130,7 +134,7 @@ export function createActivity({ cacheFor, laneFor, log = () => {} }) {
       for (const d of days) if (!out[metric][d]) out[metric][d] = cache.data[`${metric}:${d}`] || [];
     }
     cache.save();
-    return { user, from: fromKey, to: toKey, today: tKey, days, metrics: out, stale };
+    return { user, from: fromKey, to: toKey, today: tKey, days, metrics: out, stale, pending };
   }
 
   return { dailyData };

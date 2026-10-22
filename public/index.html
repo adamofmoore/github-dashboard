@@ -417,7 +417,9 @@ async function loadDaily(force, timed) {
     const repos = new Set(); for (const m of Object.values(daily.metrics)) for (const l of Object.values(m)) for (const i of l) repos.add(i.repo);
     noteRepos([...repos]); renderDaily(); renderLive();
     const at = `Updated ${new Date().toLocaleTimeString([], {hour:"numeric", minute:"2-digit"})}`;
-    if (d.stale?.length) setStatus(`${at}, but GitHub search kept answering wrong for ${d.stale.length} range${d.stale.length > 1 ? "s" : ""}; showing saved counts there`, true);
+    const plural = (n, w) => `${n} ${w}${n > 1 ? "s" : ""}`;
+    if (d.stale?.length) setStatus(`${at}, but GitHub search kept answering wrong for ${plural(d.stale.length, "range")}; showing saved counts there`, true);
+    else if (d.pending?.length) setStatus(`${at}; GitHub found nothing for ${plural(d.pending.length, "day")} that had items, which can't be checked yet, so saved counts show until it's confirmed`, true);
     else setStatus(at); }
   catch (e) { if (seq === dailySeq) setStatus("Activity failed: " + e.message, true); }
   finally { dailyBusy--; }
