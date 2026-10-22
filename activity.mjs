@@ -52,6 +52,7 @@ export function createActivity({ cacheFor, laneFor, log = () => {} }) {
       catch (e) {
         if (e.status === 404 || e.status === 410) continue; // gone for this token, so gone from its search too
         if (e.status === 403 || e.status === 451) { unread++; continue; } // SSO or legal block: no evidence either way
+        if (e.code === 429) return null; // rate-limited reads say nothing, and the rest would be too; search can still ask again
         throw e;
       }
       if (belongsIn(metric, user, issue, item.is_pr, fromKey, toKey)) return true;

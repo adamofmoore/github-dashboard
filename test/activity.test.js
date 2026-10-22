@@ -32,6 +32,7 @@ function dashboard(answer) {
     me: async () => "me",
     async gh(url, init, prio = { background: false }) {
       asked.push(new URL(url).pathname);
+      if (!new URL(url).pathname.startsWith("/search/") && answer(url).code === 429) throw Object.assign(new Error("GitHub API is rate-limited"), { code: 429 }); // as the API gate fails
       const { res, body } = new URL(url).pathname.startsWith("/search/") ? await lane.request(reply(url), prio) : await (async () => { const res = reply(url)(); return { res, body: await res.text() }; })();
       if (!res.ok) throw Object.assign(new Error(`${res.status}`), { status: res.status });
       return JSON.parse(body);
@@ -229,4 +230,20 @@ test("regression: an empty seen before a day ended can't confirm the finished da
     assert.equal(d.cache.emptyAt[k], Date.now(), `${field} at noon: the confirmation window starts now`);
     assert.equal(d.cache.data[k], data, `${field} at noon: saved items kept`);
   }
+});
+
+test("regression: a rate-limited item check is inconclusive, so search can still answer", async () => {
+  // Copilot's case: one false-empty search answer, the item read is rate-limited (REST
+  // core spent past the patience), and search's own retry has the real result.
+  let searches = 0;
+  const d = dashboard((url) => {
+    if (!url.includes("/search/")) return { code: 429 };
+    return searchOf(url).includes("merged") && ++searches > 1 ? found(MERGED_PR) : EMPTY;
+  });
+  const k = `prsMerged:${MERGED_DAY}`;
+  d.cache.data[k] = [{ repo: "acme/web", number: 101, is_pr: true }];
+  const r = await d.dailyData(d.c, MERGED_DAY, MERGED_DAY, true, true);
+  assert.equal(r.metrics.prsMerged[MERGED_DAY].length, 1, "the retry's real answer is saved");
+  assert.deepEqual(r.stale, []);
+  assert.ok(d.cache.fetchedAt[k]);
 });
