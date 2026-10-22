@@ -362,3 +362,23 @@ test("a call that throws after a cooldown still lets the waiting ones go", async
   await b;
   assert.deepEqual(gh.calls.map((c) => [c.label, Math.round((c.at - NOW) / 1000)]), [["a", 0], ["a", 10], ["b", 10]]);
 });
+
+test("regression: a late success from a call sent before the limit doesn't end one-at-a-time recovery", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: NOW });
+  // Copilot's case: a and b go out together; a is limited for 10s, b's success lands at
+  // 2s, and c is waiting. At 10s a must go alone, and its new 30s pause holds c too.
+  const gh = github((n, label) => {
+    if (label === "b") return new Promise((r) => setTimeout(() => r(reply(200, "{}")), 2000));
+    if (n === 1) return reply(429, "", { "retry-after": 10 });
+    if (n === 3) return reply(429, "", { "retry-after": 30 });
+    return reply(200, "{}");
+  });
+  const gate = apiGate();
+  const a = gate.request(gh.send("a"), "/a");
+  const b = gate.request(gh.send("b"), "/b");
+  await advance(t, 1000);
+  const c = gate.request(gh.send("c"), "/c");
+  await advance(t, 45e3);
+  await Promise.all([a, b, c]);
+  assert.deepEqual(gh.calls.map((c) => [c.label, Math.round((c.at - NOW) / 1000)]), [["a", 0], ["b", 0], ["a", 10], ["a", 40], ["c", 40]]);
+});

@@ -39,9 +39,10 @@ export function limited(until, what = "search") {
 // remembered, so the next call (say the page retrying sign-in) waits it out, or fails
 // at once if it outlasts the patience, rather than sending into it and extending it.
 // Until a call gets through again they go one at a time, so a call that wakes with the
-// others cannot send while the first one's answer is extending the pause.
+// others cannot send while the first one's answer is extending the pause. Only a call
+// sent after the latest limit ends that; one already out when it hit proves nothing.
 export function apiGate({ patienceMs = PATIENCE_MS, log = () => {} } = {}) {
-  const s = { blockedUntil: 0, strikes: 0, limited: false, probe: null };
+  const s = { blockedUntil: 0, strikes: 0, limited: false, probe: null, limits: 0 };
   return {
     async request(send, what) {
       const deadline = Date.now() + patienceMs;
@@ -53,13 +54,17 @@ export function apiGate({ patienceMs = PATIENCE_MS, log = () => {} } = {}) {
           else break;
         }
         let done;
+        const since = s.limits;
         if (s.limited) s.probe = new Promise((r) => (done = r));
         try {
           const res = await send(), body = await res.text();
           const wait = rateLimitWait(res.status, res.headers, body, s.strikes);
-          if (wait === null) { s.strikes = 0; s.limited = false; return { res, body }; }
+          if (wait === null) {
+            if (since === s.limits) { s.strikes = 0; s.limited = false; }
+            return { res, body };
+          }
           if (isSecondary(res.headers, body)) s.strikes++;
-          s.limited = true;
+          s.limited = true; s.limits++;
           s.blockedUntil = Math.max(s.blockedUntil, Date.now() + wait);
           log(`rate limit (${res.status}) on ${what}: waiting ${Math.round(wait / 1000)}s`);
         } finally { if (done) { s.probe = null; done(); } }
