@@ -25,9 +25,12 @@ export function graphqlError(errors) {
   return Object.assign(new Error(JSON.stringify(errors)), { graphqlErrors: errors });
 }
 
-// True only when every error is GitHub's own failure to run a valid query. Bad queries,
-// missing permissions or rate limits are not, because a smaller page would not fix them.
+// True only when GitHub itself failed to run a valid query: every GraphQL error is its
+// "Something went wrong", or its gateway timed the request out (502/504, which client.gh
+// throws with the HTTP status on the error). Bad queries, missing permissions or rate
+// limits are not, because a smaller page would not fix them.
 export function isGitHubQueryFailure(err) {
+  if (err?.status === 502 || err?.status === 504) return true;
   const errors = err?.graphqlErrors;
   return Boolean(errors?.length) && errors.every((e) => /^Something went wrong while executing your query/.test(e?.message || ""));
 }

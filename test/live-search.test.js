@@ -159,4 +159,16 @@ test("only GitHub's own query failures count as retryable", () => {
   assert.equal(isGitHubQueryFailure(graphqlError([])), false);
   assert.equal(isGitHubQueryFailure(new Error("Something went wrong while executing your query")), false);
   assert.equal(isGitHubQueryFailure(undefined), false);
+  // Gateway timeouts, as client.gh throws them (server.log had twelve 502/504s on 2026-10-22).
+  assert.equal(isGitHubQueryFailure(Object.assign(new Error("502 : <html>"), { status: 502 })), true);
+  assert.equal(isGitHubQueryFailure(Object.assign(new Error("504 : <!DOCTYPE html>"), { status: 504 })), true);
+  assert.equal(isGitHubQueryFailure(Object.assign(new Error("500 Internal Server Error"), { status: 500 })), false);
+  assert.equal(isGitHubQueryFailure(Object.assign(new Error("403 Forbidden"), { status: 403 })), false);
+});
+
+test("a gateway timeout on a page is retried at half the size, like a query GitHub could not run", async () => {
+  const all = items(30);
+  const gh = github(all, (c, n) => (n === 1 ? Object.assign(new Error("504 Gateway Timeout"), { status: 504 }) : undefined));
+  assert.deepEqual(await paginateSearch(gh.fetchPage, { q }), all);
+  assert.deepEqual(gh.calls.map((c) => [c.offset, c.first]), [[0, 25], [0, 12], [12, 12], [24, 12]]);
 });
