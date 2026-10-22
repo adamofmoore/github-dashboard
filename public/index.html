@@ -415,7 +415,10 @@ async function loadDaily(force, timed) {
     if (seq !== dailySeq) return;
     daily = d;
     const repos = new Set(); for (const m of Object.values(daily.metrics)) for (const l of Object.values(m)) for (const i of l) repos.add(i.repo);
-    noteRepos([...repos]); renderDaily(); renderLive(); setStatus(`Updated ${new Date().toLocaleTimeString([], {hour:"numeric", minute:"2-digit"})}`); }
+    noteRepos([...repos]); renderDaily(); renderLive();
+    const at = `Updated ${new Date().toLocaleTimeString([], {hour:"numeric", minute:"2-digit"})}`;
+    if (d.stale?.length) setStatus(`${at}, but GitHub search kept answering wrong for ${d.stale.length} range${d.stale.length > 1 ? "s" : ""}; showing saved counts there`, true);
+    else setStatus(at); }
   catch (e) { if (seq === dailySeq) setStatus("Activity failed: " + e.message, true); }
   finally { dailyBusy--; }
 }

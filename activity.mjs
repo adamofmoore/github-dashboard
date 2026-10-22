@@ -39,7 +39,7 @@ export const FRESH_MS = 90 * 1000; // how long today's counts are reused
 export const CONFIRM_MS = 10 * 60 * 1000; // how far apart two unverifiable empty answers must be to settle a day
 export const CHECK_ITEMS = 5; // cached items read directly to test an empty answer
 
-export function createActivity({ cacheFor, laneFor }) {
+export function createActivity({ cacheFor, laneFor, log = () => {} }) {
   // Whether items we already had still belong in the range, read from the issues
   // themselves rather than through search: true if one does, false only when every known
   // item was read and none does, null when that cannot be told (too many to read them
@@ -84,7 +84,7 @@ export function createActivity({ cacheFor, laneFor }) {
   async function dailyData(c, fromKey, toKey, force, background = false) {
     const user = await c.me();
     const cache = cacheFor(user), lane = laneFor(user);
-    const tKey = today(), days = daysBetween(fromKey, toKey), out = {};
+    const tKey = today(), days = daysBetween(fromKey, toKey), out = {}, stale = [];
     for (const metric of Object.keys(METRICS)) {
       out[metric] = {};
       // A past day is reusable only once it was fetched after it ended — otherwise a
@@ -103,7 +103,12 @@ export function createActivity({ cacheFor, laneFor }) {
         // warm loop started has to take it over, or each would wait on the other forever.
         const job = inflight.get(key);
         if (!background) lane.promote(job.prio);
-        for (const { day, items, unconfirmed } of await job.done) {
+        // When search keeps answering wrong for a range, that range keeps its saved days
+        // (unsettled, so it is asked again next time) and the rest still refresh.
+        let result;
+        try { result = await job.done; }
+        catch (e) { if (e.code !== "UNRELIABLE") throw e; log(`${e.message}; keeping saved data`); stale.push(`${metric} ${a}..${b}`); return; }
+        for (const { day, items, unconfirmed } of result) {
           const k = `${metric}:${day}`;
           if (unconfirmed) {
             // Nothing could check this empty answer, and false ones come in bursts, so the
@@ -119,7 +124,7 @@ export function createActivity({ cacheFor, laneFor }) {
       for (const d of days) if (!out[metric][d]) out[metric][d] = cache.data[`${metric}:${d}`] || [];
     }
     cache.save();
-    return { user, from: fromKey, to: toKey, today: tKey, days, metrics: out };
+    return { user, from: fromKey, to: toKey, today: tKey, days, metrics: out, stale };
   }
 
   return { dailyData };

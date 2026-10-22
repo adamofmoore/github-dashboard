@@ -7,12 +7,14 @@
 // again too.
 
 export const EMPTY_TRIES = 3;
+// GitHub kept answering wrong; the caller keeps what it had for this range.
+const unreliable = (msg) => Object.assign(new Error(msg), { code: "UNRELIABLE" });
 
 async function complete(page, p, label) {
   for (let tries = 1; ; tries++) {
     const r = await page(p);
     if (!r.incomplete_results) return r;
-    if (tries >= EMPTY_TRIES) throw new Error(`GitHub search timed out on page ${p} ${EMPTY_TRIES} times for ${label}`);
+    if (tries >= EMPTY_TRIES) throw unreliable(`GitHub search timed out on page ${p} ${EMPTY_TRIES} times for ${label}`);
   }
 }
 
@@ -29,7 +31,7 @@ export async function firstPage(page, stillThere, label) {
     if (still === undefined) still = stillThere ? await stillThere() : null;
     if (still === false) return r;
     if (still === null) { if (asks >= 2) return { ...r, unconfirmed: true }; continue; }
-    if (asks >= EMPTY_TRIES) throw new Error(`GitHub search kept answering with no results for ${label}, though items known to be in it are still there`);
+    if (asks >= EMPTY_TRIES) throw unreliable(`GitHub search kept answering with no results for ${label}, though items known to be in it are still there`);
   }
 }
 
@@ -45,7 +47,7 @@ export async function restPages(page, first, label) {
       if (r.items.length) { items = items.concat(r.items); break; }
       const now = await complete(page, 1, label);
       if (now.total_count && Math.ceil(now.total_count / 100) < p) break pages;
-      if (tries >= EMPTY_TRIES) throw new Error(`GitHub search answered page ${p} of ${pages} with nothing ${EMPTY_TRIES} times for ${label}`);
+      if (tries >= EMPTY_TRIES) throw unreliable(`GitHub search answered page ${p} of ${pages} with nothing ${EMPTY_TRIES} times for ${label}`);
     }
   }
   return items;

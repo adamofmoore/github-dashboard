@@ -125,7 +125,7 @@ function cacheFor(login) {
   caches.set(login, entry);
   return entry;
 }
-const { dailyData } = createActivity({ cacheFor, laneFor });
+const { dailyData } = createActivity({ cacheFor, laneFor, log: (m) => console.log(m) });
 
 // ---------- live (GraphQL) ----------
 async function searchAll(c, q, fragment) {

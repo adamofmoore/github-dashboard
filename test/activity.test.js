@@ -56,12 +56,16 @@ test("regression: a page request that joins the warm loop's fetch finishes inste
   endOther(); await other; await warm;
 });
 
-test("an empty answer for a range whose cached item is still there keeps the cache and fails", async () => {
+test("an empty answer for a range whose cached item is still there keeps the cache, and says so", async () => {
   const d = dashboard((url) => (url.includes("/search/") ? EMPTY : MERGED_PR));
   const k = `prsMerged:${MERGED_DAY}`, before = [{ repo: "acme/web", number: 101, is_pr: true }];
   d.cache.data[k] = before; d.cache.fetchedAt[k] = 1;
-  await assert.rejects(d.dailyData(d.c, MERGED_DAY, MERGED_DAY, true, true), /kept answering with no results for prsMerged/);
+  const r = await d.dailyData(d.c, MERGED_DAY, MERGED_DAY, true, true);
+  assert.deepEqual(r.stale, [`prsMerged ${MERGED_DAY}..${MERGED_DAY}`]);
+  assert.equal(r.metrics.prsMerged[MERGED_DAY], before, "shows the saved items");
   assert.equal(d.cache.data[k], before);
+  assert.equal(d.cache.fetchedAt[k], 1, "not marked fresh, so it is asked again next time");
+  assert.deepEqual(r.metrics.issuesClosed[MERGED_DAY], [], "the other metrics still refreshed");
   assert.ok(d.asked.includes("/repos/acme/web/issues/101"), "the item was read from the issues API");
 });
 
