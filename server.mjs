@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { createLiveSearch } from "./live-search.mjs";
 import { demoDaily, demoLive, demoRepos } from "./demo.mjs";
 import { createGitHub } from "./github.mjs";
+import { createRepoScanner } from "./repos.mjs";
 import { createActivity, API, daysBetween, shift, today } from "./activity.mjs";
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -123,29 +124,14 @@ async function liveData(c) {
     prs: prs.map(slimPr), reviewRequests: reviewRequests.map(slimPr) };
 }
 
-// ---------- local repos (owner only) ----------
-const SCAN_ROOTS = (process.env.REPO_ROOTS || "~,~/Studio").split(",").map((r) => r.trim().replace(/^~/, process.env.HOME)).filter(Boolean);
-const SKIP = new Set(["node_modules", "Library", ".worktrees", "worktrees", ".git", "Downloads", "Applications", "Movies", "Music", "Pictures", ...(process.env.REPO_SKIP || "Dropbox (Personal),TrainerRoad Dropbox").split(",").map((x) => x.trim()).filter(Boolean)]);
-function remoteRepo(dir) {
-  try {
-    const m = fs.readFileSync(path.join(dir, ".git", "config"), "utf8").match(/\[remote "origin"\][^[]*?url\s*=\s*(\S+)/);
-    const u = m && m[1].match(/github\.com[:/]([^/\s]+\/[^/\s]+?)(?:\.git)?$/);
-    return u ? u[1] : null;
-  } catch { return null; }
-}
-function scanRepos(root, depth, out) {
-  if (depth < 0) return;
-  let entries; try { entries = fs.readdirSync(root, { withFileTypes: true }); } catch { return; }
-  if (entries.some((e) => e.name === ".git")) { const r = remoteRepo(root); if (r) out.set(r.toLowerCase(), { repo: r, path: root }); return; }
-  for (const e of entries) { if (!e.isDirectory() || SKIP.has(e.name) || (e.name.startsWith(".") && root === process.env.HOME)) continue; scanRepos(path.join(root, e.name), depth - 1, out); }
-}
-let localRepoCache = { at: 0, list: [] };
-function localRepos() {
-  if (Date.now() - localRepoCache.at < 10 * 60 * 1000) return localRepoCache.list;
-  const out = new Map(); for (const r of SCAN_ROOTS) scanRepos(r, 6, out);
-  localRepoCache = { at: Date.now(), list: [...out.values()].sort((a, b) => a.repo.localeCompare(b.repo)) };
-  return localRepoCache.list;
-}
+// ---------- local repos (owner only, repos.mjs) ----------
+const localRepos = createRepoScanner({
+  roots: (process.env.REPO_ROOTS || "~,~/Studio").split(",").map((r) => r.trim().replace(/^~/, process.env.HOME)).filter(Boolean),
+  skip: new Set(["node_modules", "Library", ".worktrees", "worktrees", ".git", "Downloads", "Applications", "Movies", "Music", "Pictures", ...(process.env.REPO_SKIP || "Dropbox (Personal),TrainerRoad Dropbox").split(",").map((x) => x.trim()).filter(Boolean)]),
+  file: path.join(CACHE_DIR, "local-repos.json"),
+  log: (m) => console.log(m),
+});
+if (ownerToken && !DEMO) localRepos.list().catch((e) => console.log(`local repo scan failed: ${e.message}`)); // ready before the first page asks
 
 // ---------- background warm for every known token ----------
 let warming = false;
@@ -223,7 +209,7 @@ const server = http.createServer(async (req, res) => {
       const c = client(s.token);
       if (url.pathname === "/api/live") return send(res, 200, await liveData(c));
       if (url.pathname === "/api/me") return send(res, 200, { login: await c.me(), owner: Boolean(s.owner) });
-      if (url.pathname === "/api/repos") return send(res, 200, { repos: s.owner ? localRepos() : [] });
+      if (url.pathname === "/api/repos") return send(res, 200, { repos: s.owner ? await localRepos.list() : [] });
       if (url.pathname === "/api/daily") {
         const to = url.searchParams.get("to") || today(), from = url.searchParams.get("from") || to;
         if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) || from > to) return send(res, 400, { error: "bad range" });
