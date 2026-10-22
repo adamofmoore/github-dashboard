@@ -130,9 +130,10 @@ export function createActivity({ cacheFor, laneFor, log = () => {} }) {
         const key = `${user}:${metric}:${a}:${b}`;
         if (!inflight.has(key)) {
           const prio = { background }, known = daysBetween(a, b).flatMap((d) => (cache.data[`${metric}:${d}`] || []).map((i) => ({ ...i, day: d })));
-          // The job writes its result to the cache itself, once; every caller sharing it
-          // only reads the outcome, so none can re-apply it over another's write.
-          const done = searchRange(c, metric, a, b, user, prio, known).then((result) => settle(cache, metric, result), (e) => kept(cache, metric, a, b, e));
+          // The job writes its result to the cache itself, once, and saves it, so the write
+          // lands even if a later metric fails the request; every caller sharing it only
+          // reads the outcome, so none can re-apply it over another's write.
+          const done = searchRange(c, metric, a, b, user, prio, known).then((result) => settle(cache, metric, result), (e) => kept(cache, metric, a, b, e)).finally(() => cache.save());
           inflight.set(key, { prio, done: done.finally(() => inflight.delete(key)) });
         }
         // Background searches yield to page requests, so a page request awaiting a fetch the
@@ -144,7 +145,6 @@ export function createActivity({ cacheFor, laneFor, log = () => {} }) {
       }));
       for (const d of days) if (!out[metric][d]) out[metric][d] = cache.data[`${metric}:${d}`] || [];
     }
-    cache.save();
     return { user, from: fromKey, to: toKey, today: tKey, days, metrics: out, stale, pending };
   }
 

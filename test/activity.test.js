@@ -198,3 +198,19 @@ test("regression: two callers sharing a fetch apply its result once, so a confir
   assert.ok(d.cache.fetchedAt[k], "confirmed and settled");
   assert.equal(d.cache.emptyAt[k], undefined);
 });
+
+test("regression: a range's invalidation is saved even when a later metric fails the request", async () => {
+  // Copilot's case: issuesClosed comes back unreliable, then prsOpened errors, so
+  // dailyData throws; the cleared fresh stamp must reach disk before that.
+  const d = dashboard((url) => {
+    if (!url.includes("/search/")) return CLOSED_ISSUE;
+    const q = searchOf(url);
+    return q.includes("is:pr") && q.includes("created:") ? { status: 500 } : EMPTY;
+  });
+  const k = `issuesClosed:${CLOSED_DAY}`, saved = [];
+  d.cache.data[k] = [{ repo: "acme/web", number: 202, is_pr: false }]; d.cache.fetchedAt[k] = Date.now();
+  d.cache.save = () => saved.push(JSON.parse(JSON.stringify(d.cache.fetchedAt)));
+  await assert.rejects(d.dailyData(d.c, CLOSED_DAY, CLOSED_DAY, true, true));
+  assert.ok(saved.length, "the cache was saved");
+  assert.equal(saved[saved.length - 1][k], undefined, "with the stamp already cleared");
+});

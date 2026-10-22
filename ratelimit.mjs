@@ -58,6 +58,8 @@ export function apiGate({ patienceMs = PATIENCE_MS, log = () => {} } = {}) {
         if (s.limited) s.probe = new Promise((r) => (done = r));
         try {
           const res = await send(), body = await res.text();
+          // A spent quota holds every call until it resets, however short a retry-after is.
+          if (res.headers.get("x-ratelimit-remaining") === "0") s.blockedUntil = Math.max(s.blockedUntil, Number(res.headers.get("x-ratelimit-reset")) * 1000 || 0);
           const wait = rateLimitWait(res.status, res.headers, body, s.strikes);
           if (wait === null) {
             if (since === s.limits) { s.strikes = 0; s.limited = false; }

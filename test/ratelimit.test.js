@@ -382,3 +382,15 @@ test("regression: a late success from a call sent before the limit doesn't end o
   await Promise.all([a, b, c]);
   assert.deepEqual(gh.calls.map((c) => [c.label, Math.round((c.at - NOW) / 1000)]), [["a", 0], ["b", 0], ["a", 10], ["a", 40], ["c", 40]]);
 });
+
+test("regression: the API gate waits for a spent quota's reset, not just a shorter retry-after", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: NOW });
+  // Copilot's case, the search lane's regression above for the gate: retry-after: 1, but
+  // the quota is spent and resets a minute out.
+  const spentFor = (s) => ({ "retry-after": 1, "x-ratelimit-remaining": 0, "x-ratelimit-reset": Math.floor(Date.now() / 1000) + s });
+  const gh = github((n) => (n === 1 ? reply(403, PRIMARY, spentFor(60)) : reply(200, "{}")));
+  const done = apiGate().request(gh.send("user"), "/user");
+  await advance(t, 61e3);
+  await done;
+  assert.deepEqual(gh.calls.map((c) => Math.round((c.at - NOW) / 1000)), [0, 60]);
+});
