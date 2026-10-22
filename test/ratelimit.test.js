@@ -331,3 +331,34 @@ test("a secondary limit after a success starts back at a minute", async (t) => {
   await b;
   assert.deepEqual(gh.calls.map((c) => Math.round((c.at - NOW) / 1000)), [0, 60, 60, 120], "the second limit waits a minute again, not two");
 });
+
+test("regression: a call asleep on a cooldown rechecks it on waking, if another call extended it", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: NOW });
+  // Copilot's case: a and b both sleep until 10s; a wakes first, is limited again for
+  // 30s, and b must not then send on its old timer.
+  const gh = github((n, label) => (n === 1 || (label === "a" && n === 2) ? reply(429, "", { "retry-after": n === 1 ? 10 : 30 }) : reply(200, "{}")));
+  const gate = apiGate();
+  const a = gate.request(gh.send("a"), "/a");
+  await advance(t, 0);
+  const b = gate.request(gh.send("b"), "/b");
+  await advance(t, 45e3);
+  await Promise.all([a, b]);
+  assert.deepEqual(gh.calls.map((c) => [c.label, Math.round((c.at - NOW) / 1000)]), [["a", 0], ["a", 10], ["a", 40], ["b", 40]]);
+});
+
+test("a call that throws after a cooldown still lets the waiting ones go", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: NOW });
+  const gh = github((n) => {
+    if (n === 1) return reply(429, "", { "retry-after": 10 });
+    if (n === 2) throw new Error("network down");
+    return reply(200, "{}");
+  });
+  const gate = apiGate();
+  const a = gate.request(gh.send("a"), "/a").catch((e) => e.message);
+  await advance(t, 0);
+  const b = gate.request(gh.send("b"), "/b");
+  await advance(t, 11e3);
+  assert.equal(await a, "network down");
+  await b;
+  assert.deepEqual(gh.calls.map((c) => [c.label, Math.round((c.at - NOW) / 1000)]), [["a", 0], ["a", 10], ["b", 10]]);
+});
