@@ -4,8 +4,8 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { createLiveSearch, graphqlError } from "./live-search.mjs";
 import { demoDaily, demoLive, demoRepos } from "./demo.mjs";
-import { paginateSearch } from "./live-search.mjs";
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 4747);
@@ -76,7 +76,7 @@ function client(token) {
     async me() { if (!c.login) c.login = (await c.gh(`${API}/user`)).login; return c.login; },
     async graphql(query, variables) {
       const r = await c.gh(`${API}/graphql`, { method: "POST", body: JSON.stringify({ query, variables }) });
-      if (r.errors) throw Object.assign(new Error(JSON.stringify(r.errors)), { graphqlErrors: r.errors });
+      if (r.errors) throw graphqlError(r.errors);
       return r.data;
     },
   };
@@ -197,10 +197,11 @@ async function dailyData(c, fromKey, toKey, force, background = false) {
 // ---------- live (GraphQL) ----------
 // Page size, retries and completeness checks live in live-search.mjs. The explicit sort
 // gives every page the same order, so the offset cursors cannot skip or repeat a result.
+const liveSearch = createLiveSearch();
 async function searchAll(c, q, fragment) {
   const query = `query($q:String!,$first:Int!,$after:String){ search(query:$q,type:ISSUE,first:$first,after:$after){ issueCount pageInfo{hasNextPage endCursor} nodes{ ${fragment} } } }`;
   const sorted = `${q} sort:created-desc`;
-  return paginateSearch(async (after, first) => (await c.graphql(query, { q: sorted, first, after })).search,
+  return liveSearch(`${c.login}\n${sorted}`, async (after, first) => (await c.graphql(query, { q: sorted, first, after })).search,
     { q: sorted, log: (msg) => console.log(`[${c.login || "?"}] live search "${sorted}": ${msg}`) });
 }
 const ISSUE_FRAG = `... on Issue { number title url createdAt updatedAt bodyText comments{ totalCount } repository{ nameWithOwner } labels(first:10){ nodes{ name color } } milestone{ title }
