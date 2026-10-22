@@ -48,6 +48,15 @@ test("an empty answer is believed at once when the known item really left the ra
   assert.deepEqual(s.asked, [1], "no extra searches spent");
 });
 
+test("when the known items cannot all be read, an empty answer needs a second one to agree", async () => {
+  // Five sampled items left the range but a sixth was never read, or one sits behind SSO.
+  let s = search({ 1: [EMPTY, results(4)] });
+  assert.equal((await firstPage(s.page, async () => null, "issuesClosed")).total_count, 4);
+  s = search({ 1: [EMPTY, EMPTY] });
+  assert.equal((await firstPage(s.page, async () => null, "issuesClosed")).total_count, 0);
+  assert.deepEqual(s.asked, [1, 1]);
+});
+
 test("a first page with results is taken as is", async () => {
   const s = search({ 1: [results(3)] });
   let checked = false;

@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { rateLimitWait, searchLane, SEARCH_GAP_MS, SECONDARY_BASE_MS, SECONDARY_MAX_MS, PATIENCE_MS } = require("../ratelimit.mjs");
+const { rateLimitWait, searchLane, SEARCH_GAP_MS, SECONDARY_BASE_MS, SECONDARY_MAX_MS, PATIENCE_MS, LIMITED_TRIES } = require("../ratelimit.mjs");
 
 // Bodies and headers as GitHub sent them on 2026-10-22 (request D037:324345:980C7D…).
 const SECONDARY = '{"message":"You have exceeded a secondary rate limit. Please wait a few minutes before you try again. For more on scraping GitHub and how it may affect your rights, please review our Terms of Service.","documentation_url":"https://docs.github.com/rest/overview/rate-limits-for-the-rest-api#about-secondary-rate-limits","status":"403"}';
@@ -33,7 +33,7 @@ test("retry-after wins over everything else", () => {
   assert.equal(rateLimitWait(429, headers({ "retry-after": 2 }), "", 0, NOW), 2e3);
 });
 
-test("a 429 with no guidance is treated as a secondary limit", () => {
+test("a 429, or a spent quota, with no further guidance is treated as a secondary limit", () => {
   assert.equal(rateLimitWait(429, headers({}), "", 0, NOW), SECONDARY_BASE_MS);
   assert.equal(rateLimitWait(403, headers({ "x-ratelimit-remaining": 0 }), PRIMARY, 0, NOW), SECONDARY_BASE_MS, "spent quota with no reset time still backs off");
 });
@@ -119,6 +119,34 @@ test("a request already waiting when a long pause starts fails too, instead of h
   assert.equal((await first).code, 429);
   assert.equal((await second).code, 429);
   assert.equal(gh.calls.length, 1);
+});
+
+test("regression: a run of short retry-afters gives up instead of retrying forever", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: NOW });
+  // retry-after: 30 never exceeds patience on its own and never escalates.
+  let gh = github(() => reply(403, SECONDARY, { ...quota(11), "retry-after": 30 }));
+  let done = searchLane().request(gh.send("x"), user()).catch((e) => e);
+  await advance(t, PATIENCE_MS + 30e3);
+  let err = await done;
+  assert.equal(err.code, 429);
+  assert.equal(gh.calls.length, 3, "sends at 0s, 30s, 60s; the pause to 90s outlasts the 75s budget");
+  // retry-after: 1 fits the budget many times over, so the try count stops it.
+  gh = github(() => reply(429, "", { "retry-after": 1 }));
+  done = searchLane().request(gh.send("y"), user()).catch((e) => e);
+  await advance(t, 30e3);
+  err = await done;
+  assert.equal(err.code, 429);
+  assert.equal(gh.calls.length, LIMITED_TRIES);
+});
+
+test("a spent quota or retry-after does not escalate the next secondary limit", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: NOW });
+  const answers = [reply(403, PRIMARY, quota(0, 5)), reply(403, SECONDARY, quota(11)), reply(200, "{}")];
+  const gh = github(() => answers.shift());
+  const done = searchLane().request(gh.send("x"), user());
+  await advance(t, 6e3 + SECONDARY_BASE_MS + SEARCH_GAP_MS);
+  assert.equal((await done).res.status, 200);
+  assert.deepEqual(gh.calls.map((c) => c.at - NOW), [0, 6e3, 6e3 + SECONDARY_BASE_MS], "the secondary limit waits one minute, not two");
 });
 
 test("user searches jump ahead of background ones", async (t) => {

@@ -9,7 +9,8 @@
 export const SEARCH_GAP_MS = 2000; // 30 a minute
 export const SECONDARY_BASE_MS = 60 * 1000;
 export const SECONDARY_MAX_MS = 10 * 60 * 1000;
-export const PATIENCE_MS = 75 * 1000; // longest pause a request sits through before failing
+export const PATIENCE_MS = 75 * 1000; // longest a request waits on rate limits, all pauses together
+export const LIMITED_TRIES = 6; // rate-limited answers a request takes before failing, however short the waits
 export const RESERVE = 12; // searches a minute that background work leaves for the page
 
 // How long GitHub asked us to wait after this response, or null when it is not a rate limit.
@@ -23,6 +24,8 @@ export function rateLimitWait(status, headers, body, strikes, now = Date.now()) 
   if (untilReset && !/secondary rate limit/i.test(body)) return untilReset;
   return Math.max(untilReset, Math.min(SECONDARY_BASE_MS * 2 ** strikes, SECONDARY_MAX_MS));
 }
+// Only secondary limits escalate; a spent quota or a retry-after is a fixed wait.
+export const isSecondary = (headers, body) => !Number(headers.get("retry-after")) && (/secondary rate limit/i.test(body) || headers.get("x-ratelimit-remaining") !== "0");
 
 export function limited(until, what = "search") {
   const at = new Date(Math.ceil(until / 60000) * 60000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
@@ -48,32 +51,37 @@ export function searchLane({ gapMs = SEARCH_GAP_MS, patienceMs = PATIENCE_MS, re
     s.busy = true; s.last = now;
     next.go();
   }
-  // A pause longer than anyone's patience fails the whole queue now rather than hanging it.
+  // A waiter whose patience the pause outlasts fails now rather than hanging the queue.
   function release(res) {
     const remaining = res?.headers.get("x-ratelimit-remaining");
     if (remaining != null) { s.remaining = Number(remaining); s.reset = Number(res.headers.get("x-ratelimit-reset")) * 1000; }
     s.busy = false;
-    if (s.blockedUntil - Date.now() > patienceMs) for (const w of s.queue.splice(0)) w.fail(limited(s.blockedUntil));
+    for (const w of s.queue.filter((w) => s.blockedUntil > w.deadline)) { s.queue.splice(s.queue.indexOf(w), 1); w.fail(limited(s.blockedUntil)); }
     pump();
   }
   return {
     // Sends one search when its turn comes and returns { res, body } for anything that is
-    // not a rate limit; rate limits are waited out here, or fail once the pause is too long.
+    // not a rate limit. Rate limits are waited out here, up to PATIENCE_MS in all and
+    // LIMITED_TRIES answers, so a run of short retry-afters cannot loop forever.
     async request(send, prio) {
-      for (;;) {
-        if (s.blockedUntil - Date.now() > patienceMs) throw limited(s.blockedUntil);
-        await new Promise((go, fail) => { s.queue.push({ prio, go, fail }); pump(); });
+      const deadline = Date.now() + patienceMs;
+      for (let tries = 1; ; tries++) {
+        if (s.blockedUntil > deadline) throw limited(s.blockedUntil);
+        await new Promise((go, fail) => { s.queue.push({ prio, deadline, go, fail }); pump(); });
         let res, body, wait;
         try {
           res = await send(); body = await res.text();
           wait = rateLimitWait(res.status, res.headers, body, s.strikes);
           if (wait === null) s.strikes = 0;
           else {
-            s.strikes++; s.blockedUntil = Math.max(s.blockedUntil, Date.now() + wait);
-            log(`search rate limit (${res.status}, ${res.headers.get("x-ratelimit-remaining")} left${/secondary/i.test(body) ? ", secondary" : ""}): pausing searches ${Math.round(wait / 1000)}s`);
+            if (isSecondary(res.headers, body)) s.strikes++;
+            s.blockedUntil = Math.max(s.blockedUntil, Date.now() + wait);
+            const left = res.headers.get("x-ratelimit-remaining");
+            log(`search rate limit (${res.status}${left == null ? "" : `, ${left} left`}${/secondary/i.test(body) ? ", secondary" : ""}): pausing searches ${Math.round(wait / 1000)}s`);
           }
         } finally { release(res); }
         if (wait === null) return { res, body };
+        if (tries >= LIMITED_TRIES) throw limited(s.blockedUntil);
       }
     },
     // Background searches wait while any page request is running.

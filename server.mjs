@@ -5,7 +5,7 @@ import crypto from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { demoDaily, demoLive, demoRepos } from "./demo.mjs";
-import { searchLane, rateLimitWait, limited, PATIENCE_MS } from "./ratelimit.mjs";
+import { searchLane, rateLimitWait, isSecondary, limited, PATIENCE_MS, LIMITED_TRIES } from "./ratelimit.mjs";
 import { firstPage, restPages } from "./search.mjs";
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -51,12 +51,13 @@ function client(token) {
     async gh(url, init = {}, prio = { background: false }) {
       const send = () => fetch(url, { ...init, headers: { ...c.headers, ...(init.headers || {}) } });
       let res, body;
-      if (url.includes("/search/")) ({ res, body } = await c.searches.request(send, prio));
-      else for (let strikes = 0; ; strikes++) {
+      if (new URL(url).pathname.startsWith("/search/")) ({ res, body } = await c.searches.request(send, prio));
+      else for (let tries = 1, strikes = 0, deadline = Date.now() + PATIENCE_MS; ; tries++) {
         res = await send(); body = await res.text();
         const wait = rateLimitWait(res.status, res.headers, body, strikes);
         if (wait === null) break;
-        if (wait > PATIENCE_MS) throw limited(Date.now() + wait, "API");
+        if (Date.now() + wait > deadline || tries >= LIMITED_TRIES) throw limited(Date.now() + wait, "API");
+        if (isSecondary(res.headers, body)) strikes++;
         console.log(`[${c.login || "?"}] rate limit (${res.status}) on ${new URL(url).pathname}: waiting ${Math.round(wait / 1000)}s`);
         await sleep(wait);
       }
@@ -127,17 +128,25 @@ const METRICS = {
 function slim(i) {
   return { repo: i.repository_url.replace(`${API}/repos/`, ""), number: i.number, title: i.title, url: i.html_url, state: i.state, state_reason: i.state_reason || null, draft: i.draft || false, created_at: i.created_at, closed_at: i.closed_at, merged_at: i.pull_request?.merged_at || null, is_pr: Boolean(i.pull_request) };
 }
-// Whether any of a few items we already had still belongs in this metric's range, read
-// from the issue itself rather than through search.
+// Whether items we already had still belong in this metric's range, read from the issues
+// themselves rather than through search: true if one does, false only when every known
+// item was read and none does, and null when that cannot be told (too many to read them
+// all, or some unreadable), which firstPage treats like knowing nothing.
+const CHECK_ITEMS = 5;
 async function stillInRange(c, metric, user, known, fromKey, toKey) {
-  for (const item of known.slice(0, 3)) {
+  let unread = Math.max(known.length - CHECK_ITEMS, 0);
+  for (const item of known.slice(0, CHECK_ITEMS)) {
     let i;
     try { i = await c.gh(`${API}/repos/${item.repo}/issues/${item.number}`); }
-    catch (e) { if (e.status === 404 || e.status === 410) continue; throw e; }
+    catch (e) {
+      if (e.status === 404 || e.status === 410) continue; // gone for this token, so gone from its search too
+      if (e.status === 403 || e.status === 451) { unread++; continue; } // SSO or legal block: no evidence either way
+      throw e;
+    }
     const ts = METRICS[metric].ts(i), who = metric === "issuesClosed" ? (i.assignees || []).map((a) => a.login) : [i.user?.login];
     if (ts && Boolean(i.pull_request) === item.is_pr && who.includes(user) && localDay(ts) >= fromKey && localDay(ts) <= toKey) return true;
   }
-  return false;
+  return unread ? null : false;
 }
 // `known` is what the cache already holds for the range, each item tagged with its day.
 async function searchRange(c, metric, fromKey, toKey, user, prio, known = []) {
