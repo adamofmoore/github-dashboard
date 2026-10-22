@@ -473,3 +473,24 @@ test("regression: calls waiting on a search's penalty go out one at a time when 
   assert.deepEqual(at.slice(0, 2), [["graphql1", 60], ["graphql1", 95]], "the first goes alone, and again after its own new pause");
   assert.deepEqual(at.slice(2).map(([, s]) => s), [95, 95], "the others only once it got through");
 });
+
+test("regression: a search and an API call waiting on a failed probe don't both go out alone", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: NOW });
+  // Copilot's case: a's retry at 10s is the probe and fails outright at 12s; the search
+  // and b were both waiting on it. One of them goes next, alone, and the other waits for
+  // its answer.
+  const penalty = accountPenalty();
+  const gh = github((n, label) => {
+    if (n === 1) return reply(429, "", { "retry-after": 10 });
+    if (label === "a") return new Promise((_, fail) => setTimeout(() => fail(new Error("network down")), 2000));
+    return new Promise((r) => setTimeout(() => r(reply(200, "{}")), 5000));
+  });
+  const gate = apiGate({ account: () => penalty }), lane = searchLane({ penalty, gapMs: 0 });
+  const a = gate.request(gh.send("a"), "/a").catch((e) => e.message);
+  await advance(t, 11e3);
+  const waiting = [lane.request(gh.send("search"), user()), gate.request(gh.send("b"), "/b")];
+  await advance(t, 15e3);
+  await Promise.all(waiting);
+  assert.equal(await a, "network down");
+  assert.deepEqual(gh.calls.map((c) => [c.label, Math.round((c.at - NOW) / 1000)]), [["a", 0], ["a", 10], ["search", 12], ["b", 17]]);
+});

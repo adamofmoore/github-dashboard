@@ -128,7 +128,8 @@ export function searchLane({ gapMs = SEARCH_GAP_MS, patienceMs = PATIENCE_MS, re
     if (penalty.probe) { penalty.probe.then(pump); return; } // another path's call is going out alone
     s.queue.splice(s.queue.indexOf(next), 1);
     s.busy = true; s.last = now;
-    next.go();
+    // Taken here, in the same turn as the check above, so no other call can take it between.
+    next.go(penalty.begin());
   }
   function release(res) {
     const remaining = res?.headers.get("x-ratelimit-remaining");
@@ -144,8 +145,7 @@ export function searchLane({ gapMs = SEARCH_GAP_MS, patienceMs = PATIENCE_MS, re
       const deadline = Date.now() + patienceMs;
       for (let tries = 1; ; tries++) {
         if (pauseEnd(prio) > deadline) throw limited(pauseEnd(prio));
-        await new Promise((go, fail) => { s.queue.push({ prio, deadline, go, fail }); pump(); });
-        const call = penalty.begin();
+        const call = await new Promise((go, fail) => { s.queue.push({ prio, deadline, go, fail }); pump(); });
         let res, body, wait;
         try {
           res = await send(); body = await res.text();

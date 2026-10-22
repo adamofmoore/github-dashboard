@@ -54,8 +54,10 @@ export async function restPages(page, first, label) {
         items = now.items; total = now.total_count; pages = Math.min(10, Math.ceil(total / 100)); p = 1;
         break;
       }
-      if (r.items.length) { items = items.concat(r.items); break; } // the first page still agrees
-      if (tries >= EMPTY_TRIES) throw unreliable(`GitHub search answered page ${p} of ${pages} with nothing ${EMPTY_TRIES} times for ${label}`);
+      // The first page still shows the same total, so this page was the odd one; a false
+      // empty first page confirms nothing, so that is asked again.
+      if (r.items.length && now.total_count === total) { items = items.concat(r.items); break; }
+      if (tries >= EMPTY_TRIES) throw unreliable(`GitHub search answered page ${p} of ${pages} wrongly ${EMPTY_TRIES} times for ${label}`);
     }
   }
   return items;

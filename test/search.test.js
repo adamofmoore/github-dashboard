@@ -149,3 +149,13 @@ test("a later page whose total wobbles is kept when a fresh first page still agr
   assert.equal(items.length, 150);
   assert.deepEqual(s.asked, [1, 2, 1]);
 });
+
+test("regression: a changed later-page total isn't accepted on a false empty first-page check", async () => {
+  // Copilot's case: 150, then page 2 says 120, and the cross-check comes back empty.
+  // That confirms nothing, so it is asked again; the second check shows 120.
+  const s = search({ 1: [results(150, 100, 0), EMPTY, results(120, 100, 1000)], 2: [results(120, 20, 100), results(120, 20, 100), results(120, 20, 1100)] });
+  const items = await restPages(s.page, await s.page(1), "issuesClosed");
+  assert.equal(items.length, 120);
+  assert.ok(items.every((i) => i.id >= 1000), "only items from the fresh pages");
+  assert.deepEqual(s.asked, [1, 2, 1, 2, 1, 2]);
+});
