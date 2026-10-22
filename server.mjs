@@ -5,6 +5,7 @@ import crypto from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { demoDaily, demoLive, demoRepos } from "./demo.mjs";
+import { searchLane, rateLimitWait, limited, PATIENCE_MS } from "./ratelimit.mjs";
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 4747);
@@ -37,40 +38,30 @@ const today = () => dayKey(new Date());
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ---------- per-token GitHub client with rate-limit awareness ----------
-const RESERVE = 12;
+// Searches share one paced lane per token (ratelimit.mjs); other calls wait out a rate
+// limit on their own, as long as the wait fits the same patience.
 const clients = new Map();
 function client(token) {
   if (clients.has(token)) return clients.get(token);
   const c = {
     headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "github-dashboard-local" },
-    search: { remaining: 30, reset: 0 },
-    userRequests: 0,
+    searches: searchLane({ log: (m) => console.log(`[${c.login || "?"}] ${m}`) }),
     login: null,
-    async gh(url, init = {}, background = false) {
-      const isSearch = url.includes("/search/");
-      for (let attempt = 0; attempt < 6; attempt++) {
-        if (background && isSearch) {
-          while (c.userRequests > 0 || (c.search.remaining <= RESERVE && c.search.reset > Date.now())) await sleep(250);
-          if (c.search.remaining <= RESERVE) c.search.remaining = 30;
-        }
-        const res = await fetch(url, { ...init, headers: { ...c.headers, ...(init.headers || {}) } });
-        if (isSearch && res.headers.get("x-ratelimit-remaining") !== null) {
-          c.search = { remaining: Number(res.headers.get("x-ratelimit-remaining")), reset: Number(res.headers.get("x-ratelimit-reset")) * 1000 };
-        }
-        if (res.status === 403 || res.status === 429) {
-          const remaining = Number(res.headers.get("x-ratelimit-remaining"));
-          const reset = Number(res.headers.get("x-ratelimit-reset")) * 1000;
-          const retryAfter = Number(res.headers.get("retry-after")) * 1000;
-          const wait = retryAfter || (remaining === 0 && reset ? Math.max(reset - Date.now(), 1000) : 5000);
-          console.log(`[${c.login || "?"}] rate limited; waiting ${Math.round(wait / 1000)}s`);
-          await sleep(wait + 500);
-          continue;
-        }
-        if (res.status === 401) { const e = new Error("GitHub rejected the token"); e.code = 401; throw e; }
-        if (!res.ok) throw new Error(`${res.status} ${res.statusText}: ${await res.text()}`);
-        return res.json();
+    async gh(url, init = {}, prio = { background: false }) {
+      const send = () => fetch(url, { ...init, headers: { ...c.headers, ...(init.headers || {}) } });
+      let res, body;
+      if (url.includes("/search/")) ({ res, body } = await c.searches.request(send, prio));
+      else for (let strikes = 0; ; strikes++) {
+        res = await send(); body = await res.text();
+        const wait = rateLimitWait(res.status, res.headers, body, strikes);
+        if (wait === null) break;
+        if (wait > PATIENCE_MS) throw limited(Date.now() + wait, "API");
+        console.log(`[${c.login || "?"}] rate limit (${res.status}) on ${new URL(url).pathname}: waiting ${Math.round(wait / 1000)}s`);
+        await sleep(wait);
       }
-      throw new Error(`gave up after retries: ${url}`);
+      if (res.status === 401) { const e = new Error("GitHub rejected the token"); e.code = 401; throw e; }
+      if (!res.ok) throw new Error(`${res.status} ${res.statusText}: ${body}`);
+      return JSON.parse(body);
     },
     async me() { if (!c.login) c.login = (await c.gh(`${API}/user`)).login; return c.login; },
     async graphql(query, variables) {
@@ -135,18 +126,18 @@ const METRICS = {
 function slim(i) {
   return { repo: i.repository_url.replace(`${API}/repos/`, ""), number: i.number, title: i.title, url: i.html_url, state: i.state, state_reason: i.state_reason || null, draft: i.draft || false, created_at: i.created_at, closed_at: i.closed_at, merged_at: i.pull_request?.merged_at || null, is_pr: Boolean(i.pull_request) };
 }
-async function searchRange(c, metric, fromKey, toKey, user, background) {
+async function searchRange(c, metric, fromKey, toKey, user, prio) {
   const m = METRICS[metric];
   const q = `${m.q(user)} ${m.field}:${offsetIso(startOfDay(fromKey))}..${offsetIso(endOfDay(toKey))}`;
-  const first = await c.gh(`${API}/search/issues?q=${encodeURIComponent(q)}&per_page=100&page=1`, {}, background);
+  const first = await c.gh(`${API}/search/issues?q=${encodeURIComponent(q)}&per_page=100&page=1`, {}, prio);
   if (first.total_count > 1000 && fromKey !== toKey) {
     const days = daysBetween(fromKey, toKey), mid = days[Math.floor(days.length / 2) - 1], next = days[Math.floor(days.length / 2)];
-    const [a, b] = await Promise.all([searchRange(c, metric, fromKey, mid, user, background), searchRange(c, metric, next, toKey, user, background)]);
+    const [a, b] = await Promise.all([searchRange(c, metric, fromKey, mid, user, prio), searchRange(c, metric, next, toKey, user, prio)]);
     return a.concat(b);
   }
   let items = first.items;
   const pages = Math.min(10, Math.ceil(first.total_count / 100));
-  for (let p = 2; p <= pages; p++) items = items.concat((await c.gh(`${API}/search/issues?q=${encodeURIComponent(q)}&per_page=100&page=${p}`, {}, background)).items);
+  for (let p = 2; p <= pages; p++) items = items.concat((await c.gh(`${API}/search/issues?q=${encodeURIComponent(q)}&per_page=100&page=${p}`, {}, prio)).items);
   const buckets = {};
   for (const k of daysBetween(fromKey, toKey)) buckets[k] = [];
   for (const it of items) { const ts = m.ts(it); if (!ts) continue; const k = localDay(ts); if (buckets[k]) buckets[k].push(slim(it)); }
@@ -184,8 +175,12 @@ async function dailyData(c, fromKey, toKey, force, background = false) {
     for (const d of missing) { const last = spans[spans.length - 1]; if (last && daysBetween(last[1], d).length === 2) last[1] = d; else spans.push([d, d]); }
     await Promise.all(spans.map(async ([a, b]) => {
       const key = `${user}:${metric}:${a}:${b}`;
-      if (!inflight.has(key)) inflight.set(key, searchRange(c, metric, a, b, user, background).finally(() => inflight.delete(key)));
-      for (const { day, items } of await inflight.get(key)) { cache.data[`${metric}:${day}`] = items; cache.fetchedAt[`${metric}:${day}`] = Date.now(); out[metric][day] = items; }
+      if (!inflight.has(key)) { const prio = { background }; inflight.set(key, { prio, done: searchRange(c, metric, a, b, user, prio).finally(() => inflight.delete(key)) }); }
+      // Background searches yield to page requests, so a page request awaiting a fetch the
+      // warm loop started has to take it over, or each would wait on the other forever.
+      const job = inflight.get(key);
+      if (!background) c.searches.promote(job.prio);
+      for (const { day, items } of await job.done) { cache.data[`${metric}:${day}`] = items; cache.fetchedAt[`${metric}:${day}`] = Date.now(); out[metric][day] = items; }
     }));
     for (const d of days) if (!out[metric][d]) out[metric][d] = cache.data[`${metric}:${d}`] || [];
   }
@@ -322,8 +317,7 @@ const server = http.createServer(async (req, res) => {
         const to = url.searchParams.get("to") || today(), from = url.searchParams.get("from") || to;
         if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) || from > to) return send(res, 400, { error: "bad range" });
         if (daysBetween(from, to).length > 366) return send(res, 400, { error: "range over 366 days" });
-        c.userRequests++;
-        try { return send(res, 200, await dailyData(c, from, to, url.searchParams.get("force") === "1")); } finally { c.userRequests--; }
+        return send(res, 200, await c.searches.whileUser(() => dailyData(c, from, to, url.searchParams.get("force") === "1")));
       }
       return send(res, 404, { error: "not found" });
     }
@@ -333,6 +327,7 @@ const server = http.createServer(async (req, res) => {
     if (!file.startsWith(path.join(ROOT, "public")) || !fs.existsSync(file)) return send(res, 404, "not found", "text/plain");
     return send(res, 200, fs.readFileSync(file), MIME[path.extname(file)] || "application/octet-stream");
   } catch (e) {
+    if (e.code === 429) { console.log(`${url.pathname}: ${e.message}`); return send(res, 429, { error: e.message }); }
     console.error(e);
     if (e.code === 401) return send(res, 401, { error: "Sign in with GitHub first" });
     return send(res, 500, { error: String(e.message || e) });
