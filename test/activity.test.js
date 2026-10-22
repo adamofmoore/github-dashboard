@@ -153,3 +153,24 @@ test("regression: an unconfirmed empty on a settled day is confirmed by a normal
   assert.deepEqual(d.cache.data[k], [], "the second empty answer, far enough apart, settles it");
   assert.ok(d.cache.fetchedAt[k]);
 });
+
+test("regression: an empty answer disproved by a readable item does not count toward a later confirmation", async (t) => {
+  // Copilot's sequence: unverifiable empty at T+0, the item becomes readable and proves the
+  // range non-empty at T+5min, then it is unreadable again at T+10min. The T+0 empty must
+  // not combine with the T+10 one to erase the saved item.
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+  let itemReply = { status: 403 };
+  const d = dashboard((url) => (url.includes("/search/") ? EMPTY : itemReply));
+  const k = `prsMerged:${MERGED_DAY}`, before = [{ repo: "acme/web", number: 101, is_pr: true }];
+  d.cache.data[k] = before; d.cache.fetchedAt[k] = Date.now();
+  await d.dailyData(d.c, MERGED_DAY, MERGED_DAY, true, true); // T+0: unreadable, so unverifiable; held
+  assert.ok(d.cache.emptyAt[k]);
+  t.mock.timers.tick(CONFIRM_MS / 2); itemReply = MERGED_PR;
+  const mid = await d.dailyData(d.c, MERGED_DAY, MERGED_DAY, false, true); // T+5: the item is still there
+  assert.equal(mid.stale.length, 1);
+  assert.equal(d.cache.emptyAt[k], undefined, "the pending empty was disproved");
+  t.mock.timers.tick(CONFIRM_MS / 2); itemReply = { status: 403 };
+  await d.dailyData(d.c, MERGED_DAY, MERGED_DAY, false, true); // T+10: unreadable again
+  assert.equal(d.cache.data[k], before, "saved item kept: a new confirmation window started");
+  assert.equal(d.cache.fetchedAt[k], undefined);
+});

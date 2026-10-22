@@ -110,7 +110,9 @@ export function createActivity({ cacheFor, laneFor, log = () => {} }) {
         catch (e) {
           if (e.code !== "UNRELIABLE") throw e;
           log(`${e.message}; keeping saved data`); stale.push(`${metric} ${a}..${b}`);
-          for (const d of daysBetween(a, b)) delete cache.fetchedAt[`${metric}:${d}`];
+          // A known item proved the range isn't empty, so any empty answer awaiting
+          // confirmation was wrong: the next one starts a fresh CONFIRM_MS window.
+          for (const d of daysBetween(a, b)) { delete cache.fetchedAt[`${metric}:${d}`]; delete cache.emptyAt[`${metric}:${d}`]; }
           return;
         }
         for (const { day, items, unconfirmed } of result) {
