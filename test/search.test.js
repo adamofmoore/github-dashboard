@@ -166,3 +166,17 @@ test("regression: pages that don't add up to the total fail, so a partial range 
   const s = search({ 1: [results(150, 100, 0), results(150, 100, 0)], 2: [results(120, 20, 100)] });
   await assert.rejects(restPages(s.page, await s.page(1), "issuesClosed 2026-10-01..2026-10-01"), (e) => e.code === "UNRELIABLE" && /120 of 150 results/.test(e.message));
 });
+
+test("regression: a range that grows past the 1000 cap while paging fails, so it can be split next time", async () => {
+  // Copilot's case: 1000 when paging started, 1001 on the fresh first page; capping the
+  // restart at ten pages would save 1000 and drop one.
+  const pages = { 1: [results(1000), results(1001, 100, 5000)], 2: [results(1001, 100, 100)] };
+  const s = search(pages);
+  await assert.rejects(restPages(s.page, await s.page(1), "prsOpened 2026-09-22..2026-10-22"), (e) => e.code === "UNRELIABLE" && /grew past 1000/.test(e.message));
+});
+
+test("regression: overlapping pages with an unchanged total fail, though the count adds up", async () => {
+  // Copilot's case: 150 throughout, but page 2 starts at 99, repeating it and missing 149.
+  const s = search({ 1: [results(150, 100, 0)], 2: [results(150, 50, 99)] });
+  await assert.rejects(restPages(s.page, await s.page(1), "issuesClosed"), (e) => e.code === "UNRELIABLE" && /same item on two pages/.test(e.message));
+});

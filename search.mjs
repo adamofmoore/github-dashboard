@@ -51,6 +51,8 @@ export async function restPages(page, first, label) {
       const now = await complete(page, 1, label);
       if (now.total_count && now.total_count !== total) {
         if (++restarts > EMPTY_TRIES) throw unreliable(`GitHub search kept changing while paging for ${label}`);
+        // Past the cap the range would have been split; capping it here would drop items.
+        if (total <= 1000 && now.total_count > 1000) throw unreliable(`GitHub search grew past 1000 results while paging for ${label}`);
         items = now.items; total = now.total_count; pages = Math.min(10, Math.ceil(total / 100)); p = 1;
         break;
       }
@@ -61,7 +63,9 @@ export async function restPages(page, first, label) {
     }
   }
   // The pages can still disagree among themselves (a short page while the first keeps its
-  // total); what they add up to has to be what GitHub said there was, or nothing is saved.
+  // total, or page edges that shifted so one item shows twice and another not at all);
+  // what they add up to has to be what GitHub said there was, each once, or nothing is saved.
   if (items.length !== Math.min(total, 1000)) throw unreliable(`GitHub search returned ${items.length} of ${total} results for ${label}`);
+  if (new Set(items.map((i) => i.id)).size !== items.length) throw unreliable(`GitHub search returned the same item on two pages for ${label}`);
   return items;
 }
