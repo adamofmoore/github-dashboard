@@ -1,10 +1,11 @@
-// Search rate limits for one GitHub token. Search allows 30 requests a minute, but
-// GitHub also trips a "secondary" limit when searches land back to back, often with
-// quota still left, and the token is shared with every other tool using `gh` here.
+// REST search rate limits for one GitHub account. Search allows 30 requests a minute,
+// but GitHub also trips a "secondary" limit when searches land back to back, often with
+// quota still left, and the account is shared with every other tool using `gh` here.
 // That limit answers 403 with no retry-after; GitHub's docs say wait at least a
-// minute, longer each time it repeats, and retrying sooner only extends it. So
-// searches go out one at a time and spaced, page requests ahead of background
-// warming, and a rejection pauses every search on the token, not just its own.
+// minute, longer each time it repeats, and retrying sooner only extends it. So REST
+// searches go out one at a time and spaced, page requests ahead of background warming,
+// and a rejection pauses every REST search on the account, not just its own. (The live
+// lists' GraphQL search has its own limits and does not use this lane.)
 
 export const SEARCH_GAP_MS = 2000; // 30 a minute
 export const SECONDARY_BASE_MS = 60 * 1000;

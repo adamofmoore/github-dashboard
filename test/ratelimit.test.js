@@ -231,3 +231,40 @@ test("a 403 that is not a rate limit comes straight back to the caller", async (
   assert.equal(res.status, 403);
   assert.equal(gh.calls.length, 1);
 });
+
+test("a slow search holds the lane: the next one waits for it to finish, not just for the gap", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: NOW });
+  const calls = [], lane = searchLane();
+  const slow = async () => { calls.push(["slow", Date.now() - NOW]); await new Promise((r) => setTimeout(r, 5 * SEARCH_GAP_MS)); return reply(200, "{}"); };
+  const quick = async () => { calls.push(["quick", Date.now() - NOW]); return reply(200, "{}"); };
+  const all = Promise.all([lane.request(slow, user()), lane.request(quick, user())]);
+  await advance(t, 6 * SEARCH_GAP_MS);
+  await all;
+  assert.deepEqual(calls, [["slow", 0], ["quick", 5 * SEARCH_GAP_MS]]);
+});
+
+test("background waits at exactly the reserve and goes one above it", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: NOW });
+  for (const [left, waits] of [[11, true], [12, true], [13, false]]) {
+    const resetIn = (Date.now() - NOW) / 1000 + 30; // 30s from now, on each pass of the loop
+    const gh = github(() => reply(200, "{}", quota(left, resetIn)));
+    const lane = searchLane({ reserve: 12 });
+    await lane.request(gh.send("user"), user());
+    const background = lane.request(gh.send("bg"), bg());
+    await advance(t, 5 * SEARCH_GAP_MS);
+    assert.equal(gh.calls.length === 1, waits, `${left} left`);
+    await advance(t, 30e3);
+    await background;
+  }
+});
+
+test("a pause ending exactly at the deadline is waited out; one a millisecond later fails", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: NOW });
+  for (const [patienceMs, ok] of [[SECONDARY_BASE_MS, true], [SECONDARY_BASE_MS - 1, false]]) {
+    const answers = [reply(403, SECONDARY, quota(11)), reply(200, "{}")];
+    const gh = github(() => answers.shift());
+    const done = searchLane({ patienceMs }).request(gh.send("x"), user()).then(() => true, (e) => (assert.equal(e.code, 429), false));
+    await advance(t, SECONDARY_BASE_MS + SEARCH_GAP_MS);
+    assert.equal(await done, ok, `patience ${patienceMs}`);
+  }
+});

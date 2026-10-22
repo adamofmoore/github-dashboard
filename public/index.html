@@ -378,7 +378,7 @@ $("#repoBtn").onclick = () => $("#repoPanel").classList.toggle("open");
 document.addEventListener("click", (e) => { if (!$("#repoMenu").contains(e.target)) $("#repoPanel").classList.remove("open"); });
 
 let live = null, daily = null;
-async function api(path) { const r = await fetch(path); const j = await r.json(); if (!r.ok) throw new Error(j.error || r.statusText); return j; }
+async function api(path) { const r = await fetch(path); const j = await r.json(); if (!r.ok) throw Object.assign(new Error(j.error || r.statusText), { status: r.status }); return j; }
 function setStatus(t, err, busy) { $("#status").textContent = t; $("#status").className = "status" + (err ? " err" : "") + (busy ? " busy" : ""); document.body.classList.toggle("busy", Boolean(busy)); }
 
 function currentRange() {
@@ -403,13 +403,21 @@ async function loadLive(button) {
   catch (e) { setStatus("Live lists failed: " + e.message, true); }
   finally { if (button) { button.disabled = false; button.textContent = "Refresh list"; } }
 }
-async function loadDaily(force) {
-  const { from, to } = fetchRange();
+// A forced refresh can take a minute, so the timed poll skips while any load is running,
+// and only the newest request's answer is shown.
+let dailySeq = 0, dailyBusy = 0;
+async function loadDaily(force, timed) {
+  if (timed && dailyBusy) return;
+  const { from, to } = fetchRange(), seq = ++dailySeq;
   setStatus("Loading activity", false, true);
-  try { daily = await api(`/api/daily?from=${from}&to=${to}${force ? "&force=1" : ""}`);
+  dailyBusy++;
+  try { const d = await api(`/api/daily?from=${from}&to=${to}${force ? "&force=1" : ""}`);
+    if (seq !== dailySeq) return;
+    daily = d;
     const repos = new Set(); for (const m of Object.values(daily.metrics)) for (const l of Object.values(m)) for (const i of l) repos.add(i.repo);
     noteRepos([...repos]); renderDaily(); renderLive(); setStatus(`Updated ${new Date().toLocaleTimeString([], {hour:"numeric", minute:"2-digit"})}`); }
-  catch (e) { setStatus("Activity failed: " + e.message, true); }
+  catch (e) { if (seq === dailySeq) setStatus("Activity failed: " + e.message, true); }
+  finally { dailyBusy--; }
 }
 
 function inflightIssue(i) { return i.linkedPrs.length > 0; }
@@ -579,7 +587,12 @@ function showSignin(msg) { $("#signin").classList.add("open"); $("#signinErr").t
 async function start() {
   renderRepoMenu();
   let st;
-  try { st = await api("/api/auth/status"); } catch (e) { showSignin("Server unreachable: " + e.message); return; }
+  try { st = await api("/api/auth/status"); }
+  catch (e) {
+    // GitHub refusing to say who the token belongs to is not a sign-in problem.
+    if (e.status === 429) { setStatus(`${e.message}; trying again in a minute`, true); setTimeout(start, 60 * 1000); return; }
+    showSignin("Server unreachable: " + e.message); return;
+  }
   $("#deviceBlock").style.display = st.deviceFlow ? "block" : "none";
   if (st.deviceFlow) $("#tokenBlock").open = false; else $("#tokenBlock").open = true;
   if (!st.loggedIn) { showSignin(st.error); return; }
@@ -589,7 +602,7 @@ async function start() {
   if (st.owner) loadRepos();
   loadLive(); loadDaily();
   setInterval(loadLive, 2 * 60 * 1000);
-  setInterval(() => loadDaily(false), 5 * 60 * 1000);
+  setInterval(() => loadDaily(false, true), 5 * 60 * 1000);
 }
 $("#deviceStart").onclick = async () => {
   try {
@@ -597,11 +610,13 @@ $("#deviceStart").onclick = async () => {
     $("#deviceStart").style.display = "none"; $("#deviceStep").style.display = "block";
     $("#deviceCode").textContent = d.user_code; $("#deviceUrl").href = d.verification_uri;
     window.open(d.verification_uri, "_blank");
+    const stop = (msg) => { $("#deviceStart").style.display = ""; $("#deviceStep").style.display = "none"; showSignin(msg); };
     const poll = async () => {
-      const r = await post("/api/auth/device/poll", { device_code: d.device_code });
+      let r;
+      try { r = await post("/api/auth/device/poll", { device_code: d.device_code }); } catch (e) { return stop(e.message); }
       if (r.status === "ok") location.reload();
       else if (r.status === "pending") setTimeout(poll, (d.interval + 1) * 1000);
-      else { $("#deviceStart").style.display = ""; $("#deviceStep").style.display = "none"; showSignin(r.error || "Sign-in failed, try again"); }
+      else stop(r.error || "Sign-in failed, try again");
     };
     setTimeout(poll, (d.interval + 1) * 1000);
   } catch (e) { showSignin(e.message); }

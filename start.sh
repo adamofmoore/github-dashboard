@@ -5,8 +5,8 @@
 cd "$(dirname "$0")"
 PORT=${PORT:-4747}
 [ -f .env ] && set -a && . ./.env && set +a
-if ! curl -sf "http://localhost:$PORT/api/auth/status" >/dev/null 2>&1; then
+if ! curl -s -o /dev/null "http://localhost:$PORT/"; then  # any HTTP answer means it is running
   nohup node server.mjs > server.log 2>&1 &
-  for i in $(seq 1 30); do curl -sf "http://localhost:$PORT/api/auth/status" >/dev/null 2>&1 && break; sleep 0.3; done
+  for i in $(seq 1 30); do curl -s -o /dev/null "http://localhost:$PORT/" && break; sleep 0.3; done
 fi
 open "http://localhost:$PORT"

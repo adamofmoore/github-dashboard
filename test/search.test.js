@@ -23,7 +23,9 @@ test("regression: a false empty first page is asked again when nothing is known"
 
 test("with nothing known, two empty answers in a row are believed", async () => {
   const s = search({ 1: [EMPTY, EMPTY] });
-  assert.equal((await firstPage(s.page, null, "prsMerged")).total_count, 0);
+  const first = await firstPage(s.page, null, "prsMerged");
+  assert.equal(first.total_count, 0);
+  assert.equal(first.unconfirmed, true, "the caller is told nothing could check it");
   assert.deepEqual(s.asked, [1, 1]);
 });
 
@@ -44,7 +46,9 @@ test("search that keeps answering empty while a known item is still in range fai
 
 test("an empty answer is believed at once when the known item really left the range", async () => {
   const s = search({ 1: [EMPTY] });
-  assert.equal((await firstPage(s.page, async () => false, "issuesClosed")).total_count, 0);
+  const first = await firstPage(s.page, async () => false, "issuesClosed");
+  assert.equal(first.total_count, 0);
+  assert.equal(first.unconfirmed, undefined, "checked against the items, so settled");
   assert.deepEqual(s.asked, [1], "no extra searches spent");
 });
 
@@ -70,16 +74,17 @@ test("regression: an empty page in the middle is asked again instead of dropped"
   const pages = { 1: [results(657, 100, 0)] };
   for (let p = 2; p <= 7; p++) pages[p] = [results(657, p === 7 ? 57 : 100, (p - 1) * 100)];
   pages[4].unshift(EMPTY);
+  pages[1].push(results(657, 100, 0)); // asked again to see whether the results shrank
   const s = search(pages);
   const first = await s.page(1);
   const items = await restPages(s.page, first, "prsOpened");
   assert.equal(items.length, 657);
   assert.deepEqual(new Set(items.map((i) => i.id)).size, 657);
-  assert.deepEqual(s.asked, [1, 2, 3, 4, 4, 5, 6, 7]);
+  assert.deepEqual(s.asked, [1, 2, 3, 4, 1, 4, 5, 6, 7]);
 });
 
 test("a page that stays empty fails the whole fetch, so nothing partial is saved", async () => {
-  const s = search({ 1: [results(250)], 2: Array(EMPTY_TRIES).fill(EMPTY) });
+  const s = search({ 1: Array(EMPTY_TRIES + 1).fill(results(250)), 2: Array(EMPTY_TRIES).fill(EMPTY) });
   const first = await s.page(1);
   await assert.rejects(restPages(s.page, first, "prsMerged"), /page 2 of 3/);
 });
@@ -91,4 +96,28 @@ test("pages stop at GitHub's 1000-result cap", async () => {
   const items = await restPages(s.page, await s.page(1), "x");
   assert.equal(items.length, 1000);
   assert.equal(s.asked.at(-1), 10);
+});
+
+test("an empty later page is the real end when a fresh first page shows the results shrank", async () => {
+  // 101 results when paging started; one was reassigned before page 2 was read.
+  const s = search({ 1: [results(101), results(100)], 2: [EMPTY] });
+  const items = await restPages(s.page, await s.page(1), "issuesClosed");
+  assert.equal(items.length, 100);
+  assert.deepEqual(s.asked, [1, 2, 1]);
+});
+
+test("a false empty first page during the shrink check does not end paging early", async () => {
+  const s = search({ 1: [results(250), EMPTY, results(250)], 2: [EMPTY, results(250, 100, 100)], 3: [results(250, 50, 200)] });
+  const items = await restPages(s.page, await s.page(1), "x");
+  assert.equal(items.length, 250);
+});
+
+test("a reply GitHub flags incomplete is asked again, and fails if it stays incomplete", async () => {
+  const partial = { ...results(40, 12), incomplete_results: true };
+  let s = search({ 1: [partial, results(40)] });
+  assert.equal((await firstPage(s.page, null, "x")).items.length, 40);
+  s = search({ 1: Array(EMPTY_TRIES).fill(partial) });
+  await assert.rejects(firstPage(s.page, null, "prsOpened"), /timed out on page 1/);
+  s = search({ 1: [results(150)], 2: [{ ...results(150, 20, 100), incomplete_results: true }, results(150, 50, 100)] });
+  assert.equal((await restPages(s.page, await s.page(1), "x")).length, 150);
 });

@@ -10,6 +10,8 @@ Nothing personal is committed: tokens, sessions, and cached activity live in the
 
     ./start.sh            # starts the server if needed, opens http://localhost:4747
 
+Needs Node 22.12 or newer (the tests `require()` the server's ES modules). Tests: `node --test "test/*.test.js"`.
+
 You are signed in automatically on this Mac via `gh auth token`.
 
 ## Share with others
