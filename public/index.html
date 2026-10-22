@@ -289,6 +289,7 @@ table { table-layout:fixed } th:first-child, td:first-child { width:auto } td.nu
 
 <script src="/dates.js"></script>
 <script src="/triage.js"></script>
+<script src="/loads.js"></script>
 <script>
 const $ = (s) => document.querySelector(s);
 (function () { let t = "dark"; try { t = JSON.parse(localStorage.getItem("ghdash:theme")) || "dark"; } catch {} document.documentElement.dataset.theme = t;
@@ -404,14 +405,16 @@ async function loadLive(button) {
   finally { if (button) { button.disabled = false; button.textContent = "Refresh list"; } }
 }
 // A forced refresh can take a minute, so the timed poll skips while any load is running,
-// and only the newest request's answer is shown.
+// only the newest request's answer is shown, and a plain load of the range a refresh is
+// fetching waits for that refresh (loads.js).
 let dailySeq = 0, dailyBusy = 0;
+const dailyFetch = Loads.refreshSharing((range, force) => api(`/api/daily?${range}${force ? "&force=1" : ""}`));
 async function loadDaily(force, timed) {
   if (timed && dailyBusy) return;
   const { from, to } = fetchRange(), seq = ++dailySeq;
   setStatus("Loading activity", false, true);
   dailyBusy++;
-  try { const d = await api(`/api/daily?from=${from}&to=${to}${force ? "&force=1" : ""}`);
+  try { const d = await dailyFetch(`from=${from}&to=${to}`, force);
     if (seq !== dailySeq) return;
     daily = d;
     const repos = new Set(); for (const m of Object.values(daily.metrics)) for (const l of Object.values(m)) for (const i of l) repos.add(i.repo);

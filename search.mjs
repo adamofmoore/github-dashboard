@@ -60,5 +60,8 @@ export async function restPages(page, first, label) {
       if (tries >= EMPTY_TRIES) throw unreliable(`GitHub search answered page ${p} of ${pages} wrongly ${EMPTY_TRIES} times for ${label}`);
     }
   }
+  // The pages can still disagree among themselves (a short page while the first keeps its
+  // total); what they add up to has to be what GitHub said there was, or nothing is saved.
+  if (items.length !== Math.min(total, 1000)) throw unreliable(`GitHub search returned ${items.length} of ${total} results for ${label}`);
   return items;
 }

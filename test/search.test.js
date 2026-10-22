@@ -159,3 +159,10 @@ test("regression: a changed later-page total isn't accepted on a false empty fir
   assert.ok(items.every((i) => i.id >= 1000), "only items from the fresh pages");
   assert.deepEqual(s.asked, [1, 2, 1, 2, 1, 2]);
 });
+
+test("regression: pages that don't add up to the total fail, so a partial range isn't saved", async () => {
+  // Copilot's case: page 1 says 150, page 2 has 20 items and says 120, and the first-page
+  // check still says 150, so the short page is kept; 120 of 150 must not be saved.
+  const s = search({ 1: [results(150, 100, 0), results(150, 100, 0)], 2: [results(120, 20, 100)] });
+  await assert.rejects(restPages(s.page, await s.page(1), "issuesClosed 2026-10-01..2026-10-01"), (e) => e.code === "UNRELIABLE" && /120 of 150 results/.test(e.message));
+});
