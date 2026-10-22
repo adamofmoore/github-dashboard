@@ -268,3 +268,14 @@ test("a pause ending exactly at the deadline is waited out; one a millisecond la
     assert.equal(await done, ok, `patience ${patienceMs}`);
   }
 });
+
+test("regression: short retry-afters with a spent quota can't stretch a request past its patience", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: NOW });
+  // Copilot's case: retry-after: 1, but the quota is spent and resets a minute out, each time.
+  const spentFor = (s) => ({ "retry-after": 1, "x-ratelimit-remaining": 0, "x-ratelimit-reset": Math.floor(Date.now() / 1000) + s });
+  const gh = github((n) => (n <= 2 ? reply(403, PRIMARY, spentFor(60)) : reply(200, "{}")));
+  const done = searchLane().request(gh.send("x"), user()).then(() => "sent", (e) => e.code);
+  await advance(t, 130e3);
+  assert.equal(await done, 429, "the second pause runs to 120s, past the 75s budget");
+  assert.deepEqual(gh.calls.map((c) => Math.round((c.at - NOW) / 1000)), [0, 60]);
+});

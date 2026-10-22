@@ -67,7 +67,7 @@ export function createActivity({ cacheFor, laneFor, log = () => {} }) {
     const q = `${m.q(user)} ${m.field}:${offsetIso(startOfDay(fromKey))}..${offsetIso(endOfDay(toKey))}`;
     const page = (p) => c.gh(`${API}/search/issues?q=${encodeURIComponent(q)}&per_page=100&page=${p}`, {}, prio);
     const label = `${metric} ${fromKey}..${toKey}`;
-    const first = await firstPage(page, known.length ? () => stillInRange(c, metric, user, known, fromKey, toKey) : null, label);
+    const first = await firstPage(page, known.length ? () => stillInRange(c, metric, user, known, fromKey, toKey) : null, label, fromKey !== toKey);
     if (first.total_count > 1000 && fromKey !== toKey) {
       const days = daysBetween(fromKey, toKey), mid = days[Math.floor(days.length / 2) - 1], next = days[Math.floor(days.length / 2)];
       const [a, b] = await Promise.all([searchRange(c, metric, fromKey, mid, user, prio, known.filter((i) => i.day <= mid)), searchRange(c, metric, next, toKey, user, prio, known.filter((i) => i.day >= next))]);
@@ -78,6 +78,39 @@ export function createActivity({ cacheFor, laneFor, log = () => {} }) {
     for (const k of daysBetween(fromKey, toKey)) buckets[k] = [];
     for (const it of items) { const ts = m.ts(it); if (!ts) continue; const k = localDay(ts); if (buckets[k]) buckets[k].push(slim(it)); }
     return Object.entries(buckets).map(([day, list]) => ({ day, items: list, unconfirmed: Boolean(first.unconfirmed) }));
+  }
+
+  // Writes a fetched range to the cache and returns what each day now shows.
+  function settle(cache, metric, result) {
+    const days = {}, pending = [];
+    for (const { day, items, unconfirmed } of result) {
+      const k = `${metric}:${day}`;
+      if (unconfirmed) {
+        // Nothing could check this empty answer, and false ones come in bursts, so the
+        // day settles only once another answer at least CONFIRM_MS later agrees. An
+        // earlier settled empty counts as that answer. Until then it keeps what it had,
+        // minus its fresh stamp, so later loads come back to confirm it.
+        const prior = cache.emptyAt[k] ?? (cache.fetchedAt[k] && cache.data[k]?.length === 0 ? cache.fetchedAt[k] : undefined);
+        if (prior === undefined || Date.now() - prior < CONFIRM_MS) {
+          cache.emptyAt[k] = prior ?? Date.now(); delete cache.fetchedAt[k]; days[day] = cache.data[k] || [];
+          if (days[day].length) pending.push(k); // showing saved items that may be gone
+          continue;
+        }
+      }
+      delete cache.emptyAt[k];
+      cache.data[k] = items; cache.fetchedAt[k] = Date.now(); days[day] = items;
+    }
+    return { days, stale: [], pending };
+  }
+  // When search keeps answering wrong for a range, that range keeps its saved days but
+  // loses their fresh stamps, so the next load asks again; the rest still refresh.
+  function kept(cache, metric, a, b, e) {
+    if (e.code !== "UNRELIABLE") throw e;
+    log(`${e.message}; keeping saved data`);
+    // A known item proved the range isn't empty, so any empty answer awaiting
+    // confirmation was wrong: the next one starts a fresh CONFIRM_MS window.
+    for (const d of daysBetween(a, b)) { delete cache.fetchedAt[`${metric}:${d}`]; delete cache.emptyAt[`${metric}:${d}`]; }
+    return { days: {}, stale: [`${metric} ${a}..${b}`], pending: [] };
   }
 
   const inflight = new Map();
@@ -97,41 +130,17 @@ export function createActivity({ cacheFor, laneFor, log = () => {} }) {
         const key = `${user}:${metric}:${a}:${b}`;
         if (!inflight.has(key)) {
           const prio = { background }, known = daysBetween(a, b).flatMap((d) => (cache.data[`${metric}:${d}`] || []).map((i) => ({ ...i, day: d })));
-          inflight.set(key, { prio, done: searchRange(c, metric, a, b, user, prio, known).finally(() => inflight.delete(key)) });
+          // The job writes its result to the cache itself, once; every caller sharing it
+          // only reads the outcome, so none can re-apply it over another's write.
+          const done = searchRange(c, metric, a, b, user, prio, known).then((result) => settle(cache, metric, result), (e) => kept(cache, metric, a, b, e));
+          inflight.set(key, { prio, done: done.finally(() => inflight.delete(key)) });
         }
         // Background searches yield to page requests, so a page request awaiting a fetch the
         // warm loop started has to take it over, or each would wait on the other forever.
         const job = inflight.get(key);
         if (!background) lane.promote(job.prio);
-        // When search keeps answering wrong for a range, that range keeps its saved days but
-        // loses their fresh stamps, so the next load asks again; the rest still refresh.
-        let result;
-        try { result = await job.done; }
-        catch (e) {
-          if (e.code !== "UNRELIABLE") throw e;
-          log(`${e.message}; keeping saved data`); stale.push(`${metric} ${a}..${b}`);
-          // A known item proved the range isn't empty, so any empty answer awaiting
-          // confirmation was wrong: the next one starts a fresh CONFIRM_MS window.
-          for (const d of daysBetween(a, b)) { delete cache.fetchedAt[`${metric}:${d}`]; delete cache.emptyAt[`${metric}:${d}`]; }
-          return;
-        }
-        for (const { day, items, unconfirmed } of result) {
-          const k = `${metric}:${day}`;
-          if (unconfirmed) {
-            // Nothing could check this empty answer, and false ones come in bursts, so the
-            // day settles only once another answer at least CONFIRM_MS later agrees. An
-            // earlier settled empty counts as that answer. Until then it keeps what it had,
-            // minus its fresh stamp, so later loads come back to confirm it.
-            const prior = cache.emptyAt[k] ?? (cache.fetchedAt[k] && cache.data[k]?.length === 0 ? cache.fetchedAt[k] : undefined);
-            if (prior === undefined || Date.now() - prior < CONFIRM_MS) {
-              cache.emptyAt[k] = prior ?? Date.now(); delete cache.fetchedAt[k]; out[metric][day] = cache.data[k] || [];
-              if (out[metric][day].length) pending.push(k); // showing saved items that may be gone
-              continue;
-            }
-          }
-          delete cache.emptyAt[k];
-          cache.data[k] = items; cache.fetchedAt[k] = Date.now(); out[metric][day] = items;
-        }
+        const r = await job.done;
+        Object.assign(out[metric], r.days); stale.push(...r.stale); pending.push(...r.pending);
       }));
       for (const d of days) if (!out[metric][d]) out[metric][d] = cache.data[`${metric}:${d}`] || [];
     }

@@ -10,10 +10,12 @@ export const EMPTY_TRIES = 3;
 // GitHub kept answering wrong; the caller keeps what it had for this range.
 const unreliable = (msg) => Object.assign(new Error(msg), { code: "UNRELIABLE" });
 
-async function complete(page, p, label) {
+// `splittable`: an oversized first page (over 1000 results) is only used to split the
+// range into smaller searches, so it need not be complete.
+async function complete(page, p, label, splittable = false) {
   for (let tries = 1; ; tries++) {
     const r = await page(p);
-    if (!r.incomplete_results) return r;
+    if (!r.incomplete_results || (splittable && r.total_count > 1000)) return r;
     if (tries >= EMPTY_TRIES) throw unreliable(`GitHub search timed out on page ${p} ${EMPTY_TRIES} times for ${label}`);
   }
 }
@@ -23,10 +25,10 @@ async function complete(page, p, label) {
 // returned after two empty answers in a row, marked `unconfirmed` so the caller can
 // hold off settling it. `stillThere` resolves true / false / null (cannot tell), and is
 // itself null when nothing is known.
-export async function firstPage(page, stillThere, label) {
+export async function firstPage(page, stillThere, label, splittable = false) {
   let still;
   for (let asks = 1; ; asks++) {
-    const r = await complete(page, 1, label);
+    const r = await complete(page, 1, label, splittable);
     if (r.total_count) return r;
     if (still === undefined) still = stillThere ? await stillThere() : null;
     if (still === false) return r;

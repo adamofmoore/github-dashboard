@@ -39,14 +39,16 @@ export function limited(until, what = "search") {
 // joins a background fetch can promote it while it is still queued.
 export function searchLane({ gapMs = SEARCH_GAP_MS, patienceMs = PATIENCE_MS, reserve = RESERVE, log = () => {} } = {}) {
   const s = { remaining: Infinity, reset: 0, blockedUntil: 0, strikes: 0, last: -Infinity, busy: false, users: 0, queue: [], timer: null };
+  // When a waiter could next send: after any rate-limit pause, and after the quota resets
+  // if it is spent (or, for background work, down to the reserve).
+  const pauseEnd = (prio) => Math.max(s.blockedUntil, s.remaining <= (prio.background ? reserve : 0) ? s.reset : 0);
   function pump() {
     clearTimeout(s.timer); s.timer = null;
     if (s.busy) return;
     const next = s.queue.find((w) => !w.prio.background) || (s.users ? null : s.queue[0]);
     if (!next) return;
     const now = Date.now();
-    const quotaAt = s.remaining <= (next.prio.background ? reserve : 0) ? s.reset : 0;
-    const at = Math.max(s.last + gapMs, s.blockedUntil, quotaAt);
+    const at = Math.max(s.last + gapMs, pauseEnd(next.prio));
     if (at > now) { s.timer = setTimeout(pump, at - now); return; }
     s.queue.splice(s.queue.indexOf(next), 1);
     s.busy = true; s.last = now;
@@ -57,7 +59,7 @@ export function searchLane({ gapMs = SEARCH_GAP_MS, patienceMs = PATIENCE_MS, re
     const remaining = res?.headers.get("x-ratelimit-remaining");
     if (remaining != null) { s.remaining = Number(remaining); s.reset = Number(res.headers.get("x-ratelimit-reset")) * 1000; }
     s.busy = false;
-    for (const w of s.queue.filter((w) => s.blockedUntil > w.deadline)) { s.queue.splice(s.queue.indexOf(w), 1); w.fail(limited(s.blockedUntil)); }
+    for (const w of s.queue.filter((w) => pauseEnd(w.prio) > w.deadline)) { s.queue.splice(s.queue.indexOf(w), 1); w.fail(limited(pauseEnd(w.prio))); }
     pump();
   }
   return {
@@ -67,7 +69,7 @@ export function searchLane({ gapMs = SEARCH_GAP_MS, patienceMs = PATIENCE_MS, re
     async request(send, prio) {
       const deadline = Date.now() + patienceMs;
       for (let tries = 1; ; tries++) {
-        if (s.blockedUntil > deadline) throw limited(s.blockedUntil);
+        if (pauseEnd(prio) > deadline) throw limited(pauseEnd(prio));
         await new Promise((go, fail) => { s.queue.push({ prio, deadline, go, fail }); pump(); });
         let res, body, wait;
         try {

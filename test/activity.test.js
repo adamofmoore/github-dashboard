@@ -174,3 +174,27 @@ test("regression: an empty answer disproved by a readable item does not count to
   assert.equal(d.cache.data[k], before, "saved item kept: a new confirmation window started");
   assert.equal(d.cache.fetchedAt[k], undefined);
 });
+
+test("regression: a range too big for one search splits even when GitHub times out on it", async () => {
+  // Copilot's case: the oversized parent reply is incomplete every time, the children are fine.
+  const d = dashboard((url) => {
+    const q = searchOf(url), [from, to] = (q.match(/:(\d{4}-\d{2}-\d{2})T.*\.\.(\d{4}-\d{2}-\d{2})T/) || []).slice(1);
+    if (from !== to) return { total_count: 1500, incomplete_results: true, items: [] };
+    return q.includes("merged") && from === MERGED_DAY ? found(MERGED_PR) : EMPTY;
+  });
+  const r = await d.dailyData(d.c, shift(MERGED_DAY, -1), MERGED_DAY, true, true);
+  assert.deepEqual(r.stale, []);
+  assert.equal(r.metrics.prsMerged[MERGED_DAY].length, 1);
+});
+
+test("regression: two callers sharing a fetch apply its result once, so a confirmation sticks", async () => {
+  // Copilot's case: the warm loop and a page request await the same fetch; the second used to
+  // re-apply it, see the fresh stamp the first had just written, and unsettle the day again.
+  const day = shift(today(), -3), k = `prsMerged:${day}`;
+  const d = dashboard(() => EMPTY);
+  d.cache.data[k] = []; d.cache.emptyAt[k] = Date.now() - CONFIRM_MS - 1; // an empty seen over ten minutes ago
+  await Promise.all([d.dailyData(d.c, day, day, false, true), d.dailyData(d.c, day, day, false)]);
+  assert.equal(d.asked.filter((p) => p.startsWith("/search/")).length, 8, "one shared fetch: 4 metrics, 2 asks each");
+  assert.ok(d.cache.fetchedAt[k], "confirmed and settled");
+  assert.equal(d.cache.emptyAt[k], undefined);
+});
