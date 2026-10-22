@@ -416,3 +416,39 @@ test("regression: a spent quota holds only its own resource; a secondary limit h
   await Promise.all([rest, graphql]);
   assert.deepEqual(gh2.calls.map((c) => [c.label, Math.round((c.at - NOW) / 1000)]), [["rest", 0], ["rest", 60], ["graphql", 60]]);
 });
+
+// ---------- one account's penalty, shared by searches and other calls ----------
+
+test("regression: a penalty on either path holds the other; a spent search quota doesn't", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: NOW });
+  // Copilot's case: GraphQL answers a secondary limit with retry-after: 120, and the
+  // next search must not go out during it.
+  let penalty = { until: 0 }, shared = () => penalty;
+  const gh = github((n, label) => (label === "graphql" ? reply(403, SECONDARY, { "retry-after": 120 }) : reply(200, "{}")));
+  const gate = apiGate({ shared });
+  assert.equal((await gate.request(gh.send("graphql"), "/graphql", "graphql").catch((e) => e)).code, 429);
+  const search = await searchLane({ shared }).request(gh.send("search"), user()).catch((e) => e);
+  assert.equal(search.code, 429, "120s of penalty is past the search's patience");
+  assert.deepEqual(gh.calls.map((c) => c.label), ["graphql"], "no search was sent");
+
+  // And the other way: a search's secondary limit holds a REST call until it ends.
+  penalty = { until: 0 };
+  const gh2 = github((n) => (n === 1 ? reply(403, SECONDARY, quota(11)) : reply(200, "{}")));
+  const lane = searchLane({ shared }), gate2 = apiGate({ shared });
+  const s = lane.request(gh2.send("search"), user());
+  await advance(t, 1000);
+  const rest = gate2.request(gh2.send("rest"), "/user", "core");
+  await advance(t, 30e3);
+  assert.equal(gh2.calls.length, 1, "the REST call waits out the search penalty");
+  await advance(t, 35e3);
+  await Promise.all([s, rest]);
+  assert.equal(gh2.calls.find((c) => c.label === "rest").at - NOW, SECONDARY_BASE_MS, "and goes once it is over");
+
+  // A spent search quota limits searches only.
+  penalty = { until: 0 };
+  const gh3 = github((n, label) => reply(200, "{}", label === "search" ? quota(0, 50) : {}));
+  await searchLane({ shared }).request(gh3.send("search"), user());
+  await apiGate({ shared }).request(gh3.send("rest"), "/user", "core");
+  assert.deepEqual(gh3.calls.map((c) => c.label), ["search", "rest"]);
+  assert.equal(gh3.calls[1].at, gh3.calls[0].at, "REST went straight out");
+});

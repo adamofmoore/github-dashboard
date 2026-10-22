@@ -26,9 +26,15 @@ try { ownerToken = execFileSync("gh", ["auth", "token"], { encoding: "utf8", std
 // REST searches share one paced lane per GitHub login (ratelimit.mjs), since GitHub
 // limits the account, not the token; other calls go through a per-token gate that
 // remembers a rate limit and holds later calls until it ends.
-const lanes = new Map();
+// A secondary limit or retry-after penalises the whole account, so both paths share
+// one record of it per login.
+const lanes = new Map(), penalties = new Map();
+function penaltyFor(login) {
+  if (!penalties.has(login)) penalties.set(login, { until: 0 });
+  return penalties.get(login);
+}
 function laneFor(login) {
-  if (!lanes.has(login)) lanes.set(login, searchLane({ log: (m) => console.log(`[${login}] ${m}`) }));
+  if (!lanes.has(login)) lanes.set(login, searchLane({ log: (m) => console.log(`[${login}] ${m}`), shared: () => penaltyFor(login) }));
   return lanes.get(login);
 }
 const clients = new Map();
@@ -37,7 +43,7 @@ function client(token) {
   const c = {
     headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "github-dashboard-local" },
     login: null,
-    gate: apiGate({ log: (m) => console.log(`[${c.login || "?"}] ${m}`) }),
+    gate: apiGate({ log: (m) => console.log(`[${c.login || "?"}] ${m}`), shared: () => (c.login ? penaltyFor(c.login) : null) }),
     async gh(url, init = {}, prio = { background: false }) {
       const send = () => fetch(url, { ...init, headers: { ...c.headers, ...(init.headers || {}) } });
       const { pathname } = new URL(url);

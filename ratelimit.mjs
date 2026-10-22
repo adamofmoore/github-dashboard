@@ -27,6 +27,13 @@ export function rateLimitWait(status, headers, body, strikes, now = Date.now()) 
 }
 // Only secondary limits escalate; a spent quota or a retry-after is a fixed wait.
 export const isSecondary = (headers, body) => !Number(headers.get("retry-after")) && (/secondary rate limit/i.test(body) || headers.get("x-ratelimit-remaining") !== "0");
+// A plain spent quota limits only its own resource (search, core, graphql); anything else
+// (a secondary limit, a retry-after) is a penalty on the whole account.
+const isPrimary = (headers, body) => headers.get("x-ratelimit-remaining") === "0" && !Number(headers.get("retry-after")) && !/secondary rate limit/i.test(body);
+// Both paths of one account record penalties in one { until } object, so a penalty one
+// path hits holds the other too. `shared` returns it, or null while the login is unknown.
+const noShared = () => null;
+const extend = (shared, until) => { const p = shared(); if (p) p.until = Math.max(p.until, until); };
 
 export function limited(until, what = "search") {
   const at = new Date(Math.ceil(until / 60000) * 60000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
@@ -43,9 +50,9 @@ export function limited(until, what = "search") {
 // call gets through again they go one at a time, so a call that wakes with the others
 // cannot send while the first one's answer is extending the pause. Only a call sent
 // after the latest such limit ends that; one already out when it hit proves nothing.
-export function apiGate({ patienceMs = PATIENCE_MS, log = () => {} } = {}) {
+export function apiGate({ patienceMs = PATIENCE_MS, log = () => {}, shared = noShared } = {}) {
   const s = { blockedUntil: 0, resets: {}, strikes: 0, limited: false, probe: null, limits: 0 };
-  const pauseEnd = (resource) => Math.max(s.blockedUntil, s.resets[resource] || 0);
+  const pauseEnd = (resource) => Math.max(s.blockedUntil, s.resets[resource] || 0, shared()?.until || 0);
   return {
     async request(send, what, resource = "core") {
       const deadline = Date.now() + patienceMs;
@@ -70,12 +77,12 @@ export function apiGate({ patienceMs = PATIENCE_MS, log = () => {} } = {}) {
             if (since === s.limits) { s.strikes = 0; s.limited = false; }
             return { res, body };
           }
-          if (spent && !Number(res.headers.get("retry-after")) && !/secondary rate limit/i.test(body)) {
-            s.resets[resource] = Math.max(s.resets[resource] || 0, Date.now() + wait);
-          } else {
+          if (isPrimary(res.headers, body)) s.resets[resource] = Math.max(s.resets[resource] || 0, Date.now() + wait);
+          else {
             if (isSecondary(res.headers, body)) s.strikes++;
             s.limited = true; s.limits++;
             s.blockedUntil = Math.max(s.blockedUntil, Date.now() + wait);
+            extend(shared, s.blockedUntil);
           }
           log(`rate limit (${res.status}) on ${what}: waiting ${Math.round(wait / 1000)}s`);
         } finally { if (done) { s.probe = null; done(); } }
@@ -87,14 +94,17 @@ export function apiGate({ patienceMs = PATIENCE_MS, log = () => {} } = {}) {
 
 // `prio` is a shared { background } object rather than a flag, so a page request that
 // joins a background fetch can promote it while it is still queued.
-export function searchLane({ gapMs = SEARCH_GAP_MS, patienceMs = PATIENCE_MS, reserve = RESERVE, log = () => {} } = {}) {
+export function searchLane({ gapMs = SEARCH_GAP_MS, patienceMs = PATIENCE_MS, reserve = RESERVE, log = () => {}, shared = noShared } = {}) {
   const s = { remaining: Infinity, reset: 0, blockedUntil: 0, strikes: 0, last: -Infinity, busy: false, users: 0, queue: [], timer: null };
   // When a waiter could next send: after any rate-limit pause, and after the quota resets
   // if it is spent (or, for background work, down to the reserve).
-  const pauseEnd = (prio) => Math.max(s.blockedUntil, s.remaining <= (prio.background ? reserve : 0) ? s.reset : 0);
+  const pauseEnd = (prio) => Math.max(s.blockedUntil, shared()?.until || 0, s.remaining <= (prio.background ? reserve : 0) ? s.reset : 0);
+  // A waiter whose patience the pause outlasts fails now rather than hanging the queue.
+  // Checked on every turn, since the other path can extend a shared penalty at any time.
   function pump() {
     clearTimeout(s.timer); s.timer = null;
     if (s.busy) return;
+    for (const w of s.queue.filter((w) => pauseEnd(w.prio) > w.deadline)) { s.queue.splice(s.queue.indexOf(w), 1); w.fail(limited(pauseEnd(w.prio))); }
     const next = s.queue.find((w) => !w.prio.background) || (s.users ? null : s.queue[0]);
     if (!next) return;
     const now = Date.now();
@@ -104,12 +114,10 @@ export function searchLane({ gapMs = SEARCH_GAP_MS, patienceMs = PATIENCE_MS, re
     s.busy = true; s.last = now;
     next.go();
   }
-  // A waiter whose patience the pause outlasts fails now rather than hanging the queue.
   function release(res) {
     const remaining = res?.headers.get("x-ratelimit-remaining");
     if (remaining != null) { s.remaining = Number(remaining); s.reset = Number(res.headers.get("x-ratelimit-reset")) * 1000; }
     s.busy = false;
-    for (const w of s.queue.filter((w) => pauseEnd(w.prio) > w.deadline)) { s.queue.splice(s.queue.indexOf(w), 1); w.fail(limited(pauseEnd(w.prio))); }
     pump();
   }
   return {
@@ -129,12 +137,13 @@ export function searchLane({ gapMs = SEARCH_GAP_MS, patienceMs = PATIENCE_MS, re
           else {
             if (isSecondary(res.headers, body)) s.strikes++;
             s.blockedUntil = Math.max(s.blockedUntil, Date.now() + wait);
+            if (!isPrimary(res.headers, body)) extend(shared, s.blockedUntil);
             const left = res.headers.get("x-ratelimit-remaining");
             log(`search rate limit (${res.status}${left == null ? "" : `, ${left} left`}${/secondary/i.test(body) ? ", secondary" : ""}): pausing searches ${Math.round(wait / 1000)}s`);
           }
         } finally { release(res); }
         if (wait === null) return { res, body };
-        if (tries >= LIMITED_TRIES) throw limited(s.blockedUntil);
+        if (tries >= LIMITED_TRIES) throw limited(pauseEnd(prio));
       }
     },
     // Background searches wait while any page request is running.
