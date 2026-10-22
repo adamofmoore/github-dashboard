@@ -35,6 +35,29 @@ export function limited(until, what = "search") {
   return e;
 }
 
+// Other REST calls on one token are not paced, but a rate limit one of them hits is
+// remembered, so the next call (say the page retrying sign-in) waits it out, or fails
+// at once if it outlasts the patience, rather than sending into it and extending it.
+export function apiGate({ patienceMs = PATIENCE_MS, log = () => {} } = {}) {
+  const s = { blockedUntil: 0, strikes: 0 };
+  return {
+    async request(send, what) {
+      const deadline = Date.now() + patienceMs;
+      for (let tries = 1; ; tries++) {
+        if (s.blockedUntil > deadline) throw limited(s.blockedUntil, "API");
+        if (s.blockedUntil > Date.now()) await new Promise((r) => setTimeout(r, s.blockedUntil - Date.now()));
+        const res = await send(), body = await res.text();
+        const wait = rateLimitWait(res.status, res.headers, body, s.strikes);
+        if (wait === null) { s.strikes = 0; return { res, body }; }
+        if (isSecondary(res.headers, body)) s.strikes++;
+        s.blockedUntil = Math.max(s.blockedUntil, Date.now() + wait);
+        log(`rate limit (${res.status}) on ${what}: waiting ${Math.round(wait / 1000)}s`);
+        if (tries >= LIMITED_TRIES) throw limited(s.blockedUntil, "API");
+      }
+    },
+  };
+}
+
 // `prio` is a shared { background } object rather than a flag, so a page request that
 // joins a background fetch can promote it while it is still queued.
 export function searchLane({ gapMs = SEARCH_GAP_MS, patienceMs = PATIENCE_MS, reserve = RESERVE, log = () => {} } = {}) {

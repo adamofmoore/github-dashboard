@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { rateLimitWait, searchLane, SEARCH_GAP_MS, SECONDARY_BASE_MS, SECONDARY_MAX_MS, PATIENCE_MS, LIMITED_TRIES } = require("../ratelimit.mjs");
+const { rateLimitWait, searchLane, apiGate, SEARCH_GAP_MS, SECONDARY_BASE_MS, SECONDARY_MAX_MS, PATIENCE_MS, LIMITED_TRIES } = require("../ratelimit.mjs");
 
 // Bodies and headers as GitHub sent them on 2026-10-22 (request D037:324345:980C7D…).
 const SECONDARY = '{"message":"You have exceeded a secondary rate limit. Please wait a few minutes before you try again. For more on scraping GitHub and how it may affect your rights, please review our Terms of Service.","documentation_url":"https://docs.github.com/rest/overview/rate-limits-for-the-rest-api#about-secondary-rate-limits","status":"403"}';
@@ -278,4 +278,56 @@ test("regression: short retry-afters with a spent quota can't stretch a request 
   await advance(t, 130e3);
   assert.equal(await done, 429, "the second pause runs to 120s, past the 75s budget");
   assert.deepEqual(gh.calls.map((c) => Math.round((c.at - NOW) / 1000)), [0, 60]);
+});
+
+// ---------- the per-token gate for other REST calls ----------
+
+test("regression: calls after a too-long rate limit never send into the cooldown", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: NOW });
+  // Copilot's case: /user hits two secondary limits (60s, then 120s, past the patience),
+  // and the page asks again before the cooldown ends at 180s.
+  const gh = github((n) => (n <= 2 ? reply(403, SECONDARY, quota(11)) : reply(200, "{}")));
+  const gate = apiGate();
+  const first = gate.request(gh.send("user"), "/user").catch((e) => e);
+  await advance(t, SECONDARY_BASE_MS);
+  const e = await first;
+  assert.equal(e.code, 429);
+  assert.equal(e.until, NOW + 3 * SECONDARY_BASE_MS);
+  const now = await gate.request(gh.send("user"), "/user").catch((e) => e);
+  assert.equal(now.code, 429, "120s of cooldown left is past the 75s patience, so it fails at once");
+  await advance(t, SECONDARY_BASE_MS);
+  const later = gate.request(gh.send("user"), "/user");
+  await advance(t, 30e3);
+  assert.equal(gh.calls.length, 2, "with 60s left it waits instead of sending");
+  await advance(t, 31e3);
+  await later;
+  assert.deepEqual(gh.calls.map((c) => Math.round((c.at - NOW) / 1000)), [0, 60, 180]);
+});
+
+test("a call during a short remembered cooldown waits it out, then sends", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: NOW });
+  const gh = github((n) => (n === 1 ? reply(429, "", { "retry-after": 100 }) : reply(200, "{}")));
+  const gate = apiGate();
+  const first = gate.request(gh.send("a"), "/a").catch((e) => e);
+  await advance(t, 0);
+  assert.equal((await first).code, 429, "a 100s retry-after is past the patience");
+  await advance(t, 40e3);
+  const second = gate.request(gh.send("b"), "/b");
+  await advance(t, 61e3);
+  await second;
+  assert.deepEqual(gh.calls.map((c) => [c.label, Math.round((c.at - NOW) / 1000)]), [["a", 0], ["b", 100]]);
+});
+
+test("a secondary limit after a success starts back at a minute", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: NOW });
+  const answers = [reply(403, SECONDARY, quota(11)), reply(200, "{}"), reply(403, SECONDARY, quota(11)), reply(200, "{}")];
+  const gh = github(() => answers.shift());
+  const gate = apiGate();
+  const a = gate.request(gh.send("a"), "/a");
+  await advance(t, SECONDARY_BASE_MS);
+  await a;
+  const b = gate.request(gh.send("b"), "/b");
+  await advance(t, SECONDARY_BASE_MS);
+  await b;
+  assert.deepEqual(gh.calls.map((c) => Math.round((c.at - NOW) / 1000)), [0, 60, 60, 120], "the second limit waits a minute again, not two");
 });

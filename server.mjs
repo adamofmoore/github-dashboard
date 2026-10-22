@@ -5,7 +5,7 @@ import crypto from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { demoDaily, demoLive, demoRepos } from "./demo.mjs";
-import { searchLane, rateLimitWait, isSecondary, limited, PATIENCE_MS, LIMITED_TRIES } from "./ratelimit.mjs";
+import { searchLane, apiGate } from "./ratelimit.mjs";
 import { createActivity, API, daysBetween, shift, today } from "./activity.mjs";
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -22,12 +22,10 @@ fs.mkdirSync(CACHE_DIR, { recursive: true });
 let ownerToken = "";
 try { ownerToken = execFileSync("gh", ["auth", "token"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim(); } catch {}
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
 // ---------- per-token GitHub client with rate-limit awareness ----------
 // REST searches share one paced lane per GitHub login (ratelimit.mjs), since GitHub
-// limits the account, not the token; other calls wait out a rate limit on their own,
-// as long as the wait fits the same patience.
+// limits the account, not the token; other calls go through a per-token gate that
+// remembers a rate limit and holds later calls until it ends.
 const lanes = new Map();
 function laneFor(login) {
   if (!lanes.has(login)) lanes.set(login, searchLane({ log: (m) => console.log(`[${login}] ${m}`) }));
@@ -39,19 +37,11 @@ function client(token) {
   const c = {
     headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "github-dashboard-local" },
     login: null,
+    gate: apiGate({ log: (m) => console.log(`[${c.login || "?"}] ${m}`) }),
     async gh(url, init = {}, prio = { background: false }) {
       const send = () => fetch(url, { ...init, headers: { ...c.headers, ...(init.headers || {}) } });
-      let res, body;
-      if (new URL(url).pathname.startsWith("/search/")) ({ res, body } = await laneFor(await c.me()).request(send, prio));
-      else for (let tries = 1, strikes = 0, deadline = Date.now() + PATIENCE_MS; ; tries++) {
-        res = await send(); body = await res.text();
-        const wait = rateLimitWait(res.status, res.headers, body, strikes);
-        if (wait === null) break;
-        if (Date.now() + wait > deadline || tries >= LIMITED_TRIES) throw limited(Date.now() + wait, "API");
-        if (isSecondary(res.headers, body)) strikes++;
-        console.log(`[${c.login || "?"}] rate limit (${res.status}) on ${new URL(url).pathname}: waiting ${Math.round(wait / 1000)}s`);
-        await sleep(wait);
-      }
+      const { pathname } = new URL(url);
+      const { res, body } = pathname.startsWith("/search/") ? await laneFor(await c.me()).request(send, prio) : await c.gate.request(send, pathname);
       if (res.status === 401) { const e = new Error("GitHub rejected the token"); e.code = 401; throw e; }
       if (!res.ok) { const e = new Error(`${res.status} ${res.statusText}: ${body}`); e.status = res.status; throw e; }
       return JSON.parse(body);
@@ -207,7 +197,7 @@ if (!DEMO) { setTimeout(warm, 500); setInterval(warm, 5 * 60 * 1000); }
 
 // ---------- http ----------
 const MIME = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml", ".json": "application/json" };
-function send(res, code, body, type = "application/json") { res.writeHead(code, { "Content-Type": type, "Cache-Control": "no-store" }); res.end(type.startsWith("application/json") ? JSON.stringify(body) : body); }
+function send(res, code, body, type = "application/json", headers = {}) { res.writeHead(code, { "Content-Type": type, "Cache-Control": "no-store", ...headers }); res.end(type.startsWith("application/json") ? JSON.stringify(body) : body); }
 function readBody(req) { return new Promise((r) => { let s = ""; req.on("data", (d) => (s += d)).on("end", () => r(s)); }); }
 
 const server = http.createServer(async (req, res) => {
@@ -277,7 +267,10 @@ const server = http.createServer(async (req, res) => {
     if (!file.startsWith(path.join(ROOT, "public")) || !fs.existsSync(file)) return send(res, 404, "not found", "text/plain");
     return send(res, 200, fs.readFileSync(file), MIME[path.extname(file)] || "application/octet-stream");
   } catch (e) {
-    if (e.code === 429) { console.log(`${url.pathname}: ${e.message}`); return send(res, 429, { error: e.message }); }
+    if (e.code === 429) {
+      console.log(`${url.pathname}: ${e.message}`);
+      return send(res, 429, { error: e.message, until: e.until }, "application/json", { "Retry-After": String(Math.max(Math.ceil((e.until - Date.now()) / 1000), 1)) });
+    }
     console.error(e);
     if (e.code === 401) return send(res, 401, { error: "Sign in with GitHub first" });
     return send(res, 500, { error: String(e.message || e) });

@@ -378,7 +378,7 @@ $("#repoBtn").onclick = () => $("#repoPanel").classList.toggle("open");
 document.addEventListener("click", (e) => { if (!$("#repoMenu").contains(e.target)) $("#repoPanel").classList.remove("open"); });
 
 let live = null, daily = null;
-async function api(path) { const r = await fetch(path); const j = await r.json(); if (!r.ok) throw Object.assign(new Error(j.error || r.statusText), { status: r.status }); return j; }
+async function api(path) { const r = await fetch(path); const j = await r.json(); if (!r.ok) throw Object.assign(new Error(j.error || r.statusText), { status: r.status, until: j.until }); return j; }
 function setStatus(t, err, busy) { $("#status").textContent = t; $("#status").className = "status" + (err ? " err" : "") + (busy ? " busy" : ""); document.body.classList.toggle("busy", Boolean(busy)); }
 
 function currentRange() {
@@ -595,7 +595,8 @@ async function start() {
   try { st = await api("/api/auth/status"); }
   catch (e) {
     // GitHub refusing to say who the token belongs to is not a sign-in problem.
-    if (e.status === 429) { setStatus(`${e.message}; trying again in a minute`, true); setTimeout(start, 60 * 1000); return; }
+    // Ask again only once the cooldown the server reported is over.
+    if (e.status === 429) { setStatus(`${e.message}; trying again then`, true); setTimeout(start, e.until ? Math.max(e.until - Date.now(), 0) + 1000 : 60 * 1000); return; }
     showSignin("Server unreachable: " + e.message); return;
   }
   $("#deviceBlock").style.display = st.deviceFlow ? "block" : "none";
