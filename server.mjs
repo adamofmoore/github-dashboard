@@ -112,16 +112,29 @@ function firstLine(text) {
 function slimPr(n) {
   return { repo: n.repository.nameWithOwner, number: n.number, title: n.title, url: n.url, created_at: n.createdAt, updated_at: n.updatedAt, draft: n.isDraft, reviewDecision: n.reviewDecision, mergeable: n.mergeable, checks: n.statusCheckRollup?.state || null, head: n.headRefName, base: n.baseRefName, additions: n.additions, deletions: n.deletions, labels: n.labels.nodes, closes: n.closingIssuesReferences.nodes, reviewers: n.reviewRequests.nodes.map((r) => r.requestedReviewer?.login || r.requestedReviewer?.name).filter(Boolean) };
 }
-async function liveData(c) {
+// The last lists each token fetched, kept on disk so a page load (even after a restart)
+// shows them at once while fresh ones load. Files are named by a hash of the token, so
+// no token is written out.
+const savedLive = new Map();
+const liveFile = (token) => path.join(CACHE_DIR, `live-${crypto.createHash("sha256").update(token).digest("hex").slice(0, 16)}.json`);
+function lastLive(token) {
+  if (!savedLive.has(token)) { let v = null; try { v = JSON.parse(fs.readFileSync(liveFile(token), "utf8")); } catch {} savedLive.set(token, v); }
+  return savedLive.get(token);
+}
+
+async function liveData(c, token) {
   const user = await c.me();
   const [issues, prs, reviewRequests] = await Promise.all([
     searchAll(c, `assignee:${user} is:issue is:open`, ISSUE_FRAG),
     searchAll(c, `author:${user} is:pr is:open`, PR_FRAG),
     searchAll(c, `review-requested:${user} is:pr is:open`, PR_FRAG),
   ]);
-  return { user, fetchedAt: new Date().toISOString(),
+  const data = { user, fetchedAt: new Date().toISOString(),
     issues: issues.map((n) => ({ repo: n.repository.nameWithOwner, number: n.number, title: n.title, url: n.url, created_at: n.createdAt, updated_at: n.updatedAt, labels: n.labels.nodes, comments: n.comments.totalCount, why: firstLine(n.bodyText), milestone: n.milestone?.title || null, linkedPrs: n.linkedPrs.nodes.map((p) => ({ repo: p.repository.nameWithOwner, number: p.number, title: p.title, url: p.url, draft: p.isDraft, state: p.state })) })),
     prs: prs.map(slimPr), reviewRequests: reviewRequests.map(slimPr) };
+  savedLive.set(token, data);
+  fs.promises.writeFile(liveFile(token), JSON.stringify(data), { mode: 0o600 }).catch((e) => console.log(`could not save live lists: ${e.message}`));
+  return data;
 }
 
 // ---------- local repos (owner only, repos.mjs) ----------
@@ -207,7 +220,8 @@ const server = http.createServer(async (req, res) => {
       const s = sessionFor(req);
       if (!s) return send(res, 401, { error: "Sign in with GitHub first" });
       const c = client(s.token);
-      if (url.pathname === "/api/live") return send(res, 200, await liveData(c));
+      if (url.pathname === "/api/live" && url.searchParams.get("saved") === "1") return send(res, 200, lastLive(s.token) || { none: true });
+      if (url.pathname === "/api/live") return send(res, 200, await liveData(c, s.token));
       if (url.pathname === "/api/me") return send(res, 200, { login: await c.me(), owner: Boolean(s.owner) });
       if (url.pathname === "/api/repos") return send(res, 200, { repos: s.owner ? await localRepos.list() : [] });
       if (url.pathname === "/api/daily") {

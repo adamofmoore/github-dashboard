@@ -397,10 +397,18 @@ function fetchRange() {
   const lo = r.from < shift(t,-29) ? r.from : shift(t,-29);
   return { from: prevDay(lo), to: r.to > t ? r.to : t };
 }
+function showLive(d) {
+  live = d; $("#who").textContent = live.user;
+  noteRepos([...live.issues, ...live.prs, ...live.reviewRequests].map((i) => i.repo)); renderLive();
+}
+// The lists saved last time show at once, with their age, while fresh ones load (a few
+// seconds); a fresh answer that lands first wins.
+async function loadSavedLive() {
+  try { const d = await api("/api/live?saved=1"); if (!live && !d.none) showLive(d); } catch {}
+}
 async function loadLive(button) {
   if (button) { button.disabled = true; button.textContent = "Refreshing…"; }
-  try { live = await api("/api/live"); $("#who").textContent = live.user;
-    noteRepos([...live.issues, ...live.prs, ...live.reviewRequests].map((i) => i.repo)); renderLive(); }
+  try { showLive(await api("/api/live")); }
   catch (e) { setStatus("Live lists failed: " + e.message, true); }
   finally { if (button) { button.disabled = false; button.textContent = "Refresh list"; } }
 }
@@ -609,7 +617,7 @@ async function start() {
   $("#who").textContent = st.login;
   $("#signout").style.display = st.owner ? "none" : "";
   if (st.owner) loadRepos();
-  loadLive(); loadDaily();
+  loadSavedLive(); loadLive(); loadDaily();
   setInterval(loadLive, 2 * 60 * 1000);
   setInterval(() => loadDaily(false, true), 5 * 60 * 1000);
 }
