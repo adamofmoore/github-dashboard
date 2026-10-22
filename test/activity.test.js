@@ -64,7 +64,7 @@ test("an empty answer for a range whose cached item is still there keeps the cac
   assert.deepEqual(r.stale, [`prsMerged ${MERGED_DAY}..${MERGED_DAY}`]);
   assert.equal(r.metrics.prsMerged[MERGED_DAY], before, "shows the saved items");
   assert.equal(d.cache.data[k], before);
-  assert.equal(d.cache.fetchedAt[k], 1, "not marked fresh, so it is asked again next time");
+  assert.equal(d.cache.fetchedAt[k], undefined, "not fresh, so it is asked again next time");
   assert.deepEqual(r.metrics.issuesClosed[MERGED_DAY], [], "the other metrics still refreshed");
   assert.ok(d.asked.includes("/repos/acme/web/issues/101"), "the item was read from the issues API");
 });
@@ -122,4 +122,32 @@ test("a day already settled empty counts as the earlier answer, so Refresh doesn
   await d.dailyData(d.c, day, day, true, true);
   assert.ok(d.cache.fetchedAt[k] > settledAt);
   assert.equal(d.cache.emptyAt[k], undefined);
+});
+
+test("regression: a settled day whose forced refresh fails is asked again on the next normal load", async () => {
+  // Copilot's case: the earlier stale-range test stamped fetchedAt = 1, already stale, so it missed this.
+  const d = dashboard((url) => (url.includes("/search/") ? EMPTY : MERGED_PR));
+  const k = `prsMerged:${MERGED_DAY}`, before = [{ repo: "acme/web", number: 101, is_pr: true }];
+  d.cache.data[k] = before; d.cache.fetchedAt[k] = Date.now(); // fetched long after that day ended
+  assert.equal((await d.dailyData(d.c, MERGED_DAY, MERGED_DAY, true, true)).stale.length, 1);
+  assert.equal(d.cache.fetchedAt[k], undefined, "no longer fresh");
+  assert.equal(d.cache.data[k], before, "but the saved items stay");
+  const asked = d.asked.length;
+  const again = await d.dailyData(d.c, MERGED_DAY, MERGED_DAY, false, true);
+  assert.ok(d.asked.slice(asked).some((p) => p.startsWith("/search/")), "the normal load asked search again");
+  assert.equal(again.stale.length, 1, "and still reports the range as stale");
+});
+
+test("regression: an unconfirmed empty on a settled day is confirmed by a normal load CONFIRM_MS later", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+  const d = dashboard((url) => (url.includes("/search/") ? EMPTY : { ...CLOSED_ISSUE, state: "open", closed_at: null }));
+  const k = `issuesClosed:${CLOSED_DAY}`, before = Array.from({ length: CHECK_ITEMS + 1 }, (_, i) => ({ repo: "acme/web", number: 400 + i, is_pr: false }));
+  d.cache.data[k] = before; d.cache.fetchedAt[k] = Date.now();
+  await d.dailyData(d.c, CLOSED_DAY, CLOSED_DAY, true, true); // forced refresh: unverifiable empty
+  assert.equal(d.cache.data[k], before);
+  assert.equal(d.cache.fetchedAt[k], undefined, "held, and no longer fresh");
+  t.mock.timers.tick(CONFIRM_MS);
+  await d.dailyData(d.c, CLOSED_DAY, CLOSED_DAY, false, true); // a normal load, ten minutes on
+  assert.deepEqual(d.cache.data[k], [], "the second empty answer, far enough apart, settles it");
+  assert.ok(d.cache.fetchedAt[k]);
 });

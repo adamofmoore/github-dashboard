@@ -103,19 +103,25 @@ export function createActivity({ cacheFor, laneFor, log = () => {} }) {
         // warm loop started has to take it over, or each would wait on the other forever.
         const job = inflight.get(key);
         if (!background) lane.promote(job.prio);
-        // When search keeps answering wrong for a range, that range keeps its saved days
-        // (unsettled, so it is asked again next time) and the rest still refresh.
+        // When search keeps answering wrong for a range, that range keeps its saved days but
+        // loses their fresh stamps, so the next load asks again; the rest still refresh.
         let result;
         try { result = await job.done; }
-        catch (e) { if (e.code !== "UNRELIABLE") throw e; log(`${e.message}; keeping saved data`); stale.push(`${metric} ${a}..${b}`); return; }
+        catch (e) {
+          if (e.code !== "UNRELIABLE") throw e;
+          log(`${e.message}; keeping saved data`); stale.push(`${metric} ${a}..${b}`);
+          for (const d of daysBetween(a, b)) delete cache.fetchedAt[`${metric}:${d}`];
+          return;
+        }
         for (const { day, items, unconfirmed } of result) {
           const k = `${metric}:${day}`;
           if (unconfirmed) {
             // Nothing could check this empty answer, and false ones come in bursts, so the
             // day settles only once another answer at least CONFIRM_MS later agrees. An
-            // earlier settled empty counts as that answer. Until then it keeps what it had.
+            // earlier settled empty counts as that answer. Until then it keeps what it had,
+            // minus its fresh stamp, so later loads come back to confirm it.
             const prior = cache.emptyAt[k] ?? (cache.fetchedAt[k] && cache.data[k]?.length === 0 ? cache.fetchedAt[k] : undefined);
-            if (prior === undefined || Date.now() - prior < CONFIRM_MS) { cache.emptyAt[k] = prior ?? Date.now(); out[metric][day] = cache.data[k] || []; continue; }
+            if (prior === undefined || Date.now() - prior < CONFIRM_MS) { cache.emptyAt[k] = prior ?? Date.now(); delete cache.fetchedAt[k]; out[metric][day] = cache.data[k] || []; continue; }
           }
           delete cache.emptyAt[k];
           cache.data[k] = items; cache.fetchedAt[k] = Date.now(); out[metric][day] = items;
