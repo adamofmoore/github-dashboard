@@ -536,10 +536,14 @@ function renderDaily() {
   document.querySelectorAll(".tile").forEach((b) => { b.onclick = (e) => { if (e.target.closest(".dates, .datelink, .preset")) return; pick(b.dataset.tile); }; b.onkeydown = (e) => { if ((e.key === "Enter" || e.key === " ") && !e.target.closest(".dates, .preset")) { e.preventDefault(); pick(b.dataset.tile); } }; });
   const useCustom = () => { store.set("customPreset", customPreset); store.set("customRange", customRange); activeTile = "custom"; store.set("activeTile", activeTile); loadDaily(); };
   const applyDates = () => { const f = $("#from").value, t = $("#to").value; if (!f || !t) return; customRange = f <= t ? { from: f, to: t } : { from: t, to: f }; customPreset = null; useCustom(); };
-  // Choosing "Custom dates" keeps the range on screen, now fixed, and opens the picker to change it.
+  // Choosing "Custom dates" keeps the range on screen, now fixed. On the Custom tile that
+  // range is already loaded, so it opens the picker without reloading, which would redraw
+  // the tile and close the picker; from another tile it loads the range first.
   $("#preset").onchange = (e) => {
-    if (e.target.value === "dates") { customRange = customWindow(); customPreset = null; useCustom(); const inp = $("#from"); if (inp?.showPicker) inp.showPicker(); return; }
-    customPreset = e.target.value; useCustom();
+    if (e.target.value === "dates") customRange = customWindow(); // the range on screen, read before the pick is cleared
+    customPreset = e.target.value === "dates" ? null : e.target.value;
+    if (customPreset === null && activeTile === "custom") { store.set("customPreset", null); store.set("customRange", customRange); const inp = $("#from"); if (inp?.showPicker) inp.showPicker(); return; }
+    useCustom();
   };
   $("#from").onchange = $("#to").onchange = applyDates;
   document.querySelectorAll(".datelink a").forEach((a) => a.onclick = (e) => { e.preventDefault(); e.stopPropagation(); const inp = $("#" + a.dataset.pick); if (inp.showPicker) inp.showPicker(); else inp.focus(); });
