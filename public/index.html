@@ -414,11 +414,10 @@ async function loadLive(button) {
 // to four days back with the work week on.
 const needs = (from, to) => daysBetween(from === to ? prevDay(from) : from, to);
 const stateOf = (from, to) => loader.state(needs(from, to));
-// Activity loads in pieces, Today's first, then the picked tile's, then the rest; the
-// 30-day window also covers the lists' closed and merged history (loads.js).
+// Activity loads in pieces, in Loads.tileOrder: Today, Yesterday, then the wider windows.
 const loader = Loads.createLoader({
   fetch: (from, to, force) => api(`/api/daily?from=${from}&to=${to}${force ? "&force=1" : ""}`),
-  windows: () => ["today", activeTile, "yesterday", "7d", "30d", "custom"].map((id) => needs(...windowFor(id))),
+  windows: () => Loads.tileOrder(activeTile).map((id) => needs(...windowFor(id))),
   onAnswer: (d) => {
     daily = loader.held;
     if (d) { const repos = new Set(); for (const m of Object.values(d.metrics)) for (const l of Object.values(m)) for (const i of l) repos.add(i.repo); noteRepos([...repos]); }
