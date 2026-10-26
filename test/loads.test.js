@@ -61,3 +61,27 @@ test("regression: refreshes of two ranges are tracked apart, so going back to th
   s.load("b", false);
   assert.deepEqual(s.asked.map((x) => [x.key, x.force]).at(-1), ["b", false], "while B, finished, asks on its own");
 });
+
+const { hold, holds } = require("../public/loads.js");
+const answer = (days, n) => ({ days, metrics: { prsMerged: Object.fromEntries(days.map((d) => [d, Array.from({ length: n }, (_, i) => ({ repo: "a/b", number: i }))])) } });
+
+test("regression: days already loaded stay readable while another range loads", () => {
+  // The Today tile hid its 29 merged PRs behind a loading shimmer while a fetch ran,
+  // though the list beside it already showed them. What is held is what is shown.
+  let held = hold(null, answer(["10-25", "10-26"], 29), 1);
+  assert.equal(holds(held, ["10-26"]), true);
+  held = hold(held, answer(["10-20", "10-21"], 1), 2);
+  assert.equal(holds(held, ["10-20", "10-26"]), true, "a second range adds to the first rather than replacing it");
+  assert.equal(held.metrics.prsMerged["10-26"].length, 29);
+  assert.equal(holds(held, ["10-22"]), false, "a day never loaded is not held");
+  assert.equal(holds(null, ["10-26"]), false, "nothing is held before the first answer");
+});
+
+test("an older answer landing late doesn't overwrite a newer one's days", () => {
+  let held = hold(null, answer(["10-26"], 5), 2);
+  held = hold(held, answer(["10-25", "10-26"], 3), 1);
+  assert.equal(held.metrics.prsMerged["10-26"].length, 5, "the newer request's count stays");
+  assert.equal(held.metrics.prsMerged["10-25"].length, 3, "the older one still fills days the newer didn't fetch");
+  held = hold(held, answer(["10-26"], 7), 2);
+  assert.equal(held.metrics.prsMerged["10-26"].length, 7, "the same request answering again (a shared refresh) still lands");
+});

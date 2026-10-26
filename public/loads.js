@@ -20,5 +20,20 @@
       return answer;
     };
   }
-  return { refreshSharing };
+  // Every activity answer is folded into what the page already holds, so picking another
+  // tile, the timed poll or a Refresh never hides numbers that are already known. Each day
+  // keeps the newest request's counts: an older request answering late can only fill days
+  // the newer one didn't fetch. `seq` is the request's order; `at` maps day -> its seq.
+  function hold(held, answer, seq) {
+    const out = { metrics: {}, at: { ...held?.at } };
+    for (const m of new Set([...Object.keys(held?.metrics || {}), ...Object.keys(answer.metrics)])) out.metrics[m] = { ...held?.metrics[m] };
+    for (const d of answer.days) {
+      if (out.at[d] > seq) continue;
+      out.at[d] = seq;
+      for (const m of Object.keys(answer.metrics)) out.metrics[m][d] = answer.metrics[m][d] || [];
+    }
+    return out;
+  }
+  const holds = (held, days) => Boolean(held) && days.every((d) => d in held.at);
+  return { refreshSharing, hold, holds };
 });
