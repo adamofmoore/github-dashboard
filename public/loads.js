@@ -1,29 +1,18 @@
-// Which activity request a load should wait on. Loaded as a classic script by
-// index.html (exposes window.Loads) and required by test/loads.test.js under Node.
-// A forced refresh can take a minute. A plain load of the same range started during it
-// (say a preset change, since presets share one fetch range) waits for that refresh
-// rather than asking separately: a plain load answers at once from the cache, and,
-// being newer, would win over the refresh and hide its result and warnings.
+// How the activity tiles load. Loaded as a classic script by index.html (exposes
+// window.Loads) and required by test/loads.test.js under Node.
+//
+// A load (a "round": the page opening, Refresh, or the timed poll) asks for the days
+// each window needs one piece at a time, in the page's order — Today first — so each
+// tile fills in as soon as its own days land instead of waiting on the whole range.
+// Pieces never overlap, so a forced refresh searches each day once. The order is read
+// again before every piece, so picking a tile or a Custom range mid-load moves it up.
 (function (root, factory) {
   const api = factory();
   if (typeof module === "object" && module.exports) module.exports = api; else root.Loads = api;
 })(this, function () {
-  function refreshSharing(fetch) {
-    const refreshing = new Map(); // range -> the newest forced refresh of it still in flight
-    return function load(key, force) {
-      if (!force && refreshing.has(key)) return refreshing.get(key);
-      const answer = fetch(key, force);
-      if (force) {
-        refreshing.set(key, answer);
-        answer.then(() => {}, () => {}).then(() => { if (refreshing.get(key) === answer) refreshing.delete(key); });
-      }
-      return answer;
-    };
-  }
-  // Every activity answer is folded into what the page already holds, so picking another
-  // tile, the timed poll or a Refresh never hides numbers that are already known. Each day
-  // keeps the newest request's counts: an older request answering late can only fill days
-  // the newer one didn't fetch. `seq` is the request's order; `at` maps day -> its seq.
+  // Every answer is folded into what the page already holds. Each day keeps the newest
+  // request's counts: an older request answering late can only fill days the newer one
+  // didn't fetch. `seq` is the request's order; `at` maps day -> its seq.
   function hold(held, answer, seq) {
     const out = { metrics: {}, at: { ...held?.at } };
     for (const m of new Set([...Object.keys(held?.metrics || {}), ...Object.keys(answer.metrics)])) out.metrics[m] = { ...held?.metrics[m] };
@@ -34,6 +23,73 @@
     }
     return out;
   }
-  const holds = (held, days) => Boolean(held) && days.every((d) => d in held.at);
-  return { refreshSharing, hold, holds };
+  // Whether every day is held from a request numbered `since` or later.
+  const holds = (held, days, since = 0) => Boolean(held) && days.every((d) => held.at[d] >= since);
+
+  // Splits windows (each an ascending run of day keys, most wanted first) into the
+  // pieces to ask for: each day goes to the first window that needs it, days in `skip`
+  // are left out, and what is left of a window comes back as contiguous runs.
+  function plan(windows, skip) {
+    const taken = new Set(skip), pieces = [];
+    for (const days of windows) {
+      let run = null;
+      for (const d of days) {
+        if (taken.has(d)) { run = null; continue; }
+        taken.add(d);
+        if (!run) pieces.push((run = []));
+        run.push(d);
+      }
+    }
+    return pieces;
+  }
+
+  // fetch(from, to, force) answers { days, metrics, stale, pending }; windows() lists the
+  // windows in the order they should load; onAnswer runs after each piece lands and
+  // onStatus when a round starts or finishes asking.
+  function createLoader({ fetch, windows, onAnswer = () => {}, onStatus = () => {} }) {
+    let held = null, seq = 0, round = null;
+    // A quiet round (the timed poll) keeps showing what is held while it checks for news;
+    // any other round shows a day only once this round has loaded it, so a number on
+    // screen is never one the load in progress is about to replace.
+    function state(days) {
+      if (!round) return "loading";
+      if (holds(held, days, round.quiet ? 0 : round.first)) return "ready";
+      if (days.some((d) => round.failed.has(d))) return holds(held, days) ? "old" : "failed";
+      return "loading";
+    }
+    async function pump(r) {
+      if (r.running) return;
+      r.running = true; onStatus(r);
+      while (round === r) {
+        const done = Object.keys(held?.at || {}).filter((d) => held.at[d] >= r.first);
+        const [piece] = plan(windows(), [...done, ...r.failed]);
+        if (!piece) break;
+        const s = ++seq;
+        try {
+          const a = await fetch(piece[0], piece[piece.length - 1], r.force);
+          held = hold(held, a, s);
+          r.stale.push(...(a.stale || [])); r.pending.push(...(a.pending || []));
+          onAnswer(a);
+        } catch (e) {
+          // Not asked again this round, or a refused piece would be retried forever.
+          r.error = e; for (const d of piece) r.failed.add(d);
+          onAnswer(null);
+        }
+      }
+      r.running = false;
+      if (round === r) onStatus(r);
+    }
+    return {
+      start({ force = false, quiet = false } = {}) {
+        round = { first: seq + 1, force, quiet, running: false, failed: new Set(), stale: [], pending: [], error: null };
+        pump(round);
+      },
+      // The windows changed (a tile or range was picked): load what they now need.
+      nudge() { if (round) pump(round); },
+      busy: () => Boolean(round?.running),
+      state,
+      get held() { return held; },
+    };
+  }
+  return { hold, holds, plan, createLoader };
 });
