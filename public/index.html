@@ -208,11 +208,9 @@ table { table-layout:fixed } th:first-child, td:first-child { width:auto } td.nu
 .sk::after { content:""; position:absolute; inset:0; background:linear-gradient(90deg, transparent, var(--shimmer), transparent); animation:shimmer 1.3s infinite }
 @keyframes shimmer { from { transform:translateX(-100%) } to { transform:translateX(100%) } }
 .sk-row { height:38px; margin:8px 12px; border-radius:6px }
-.busy .n b, .busy #legend { color:transparent; background:var(--chip); border-radius:4px; animation:pulse 1.2s ease-in-out infinite }
-.busy #legend .dot { visibility:hidden }
-.busy #chart { opacity:.35 }
-@keyframes pulse { 50% { opacity:.55 } }
-@media (prefers-reduced-motion:reduce) { .sk::after, .busy * , .status.busy::before { animation:none } }
+.sk-n { display:inline-block; min-width:2ch }
+.chart-wrap.loading #chart { opacity:.35 }
+@media (prefers-reduced-motion:reduce) { .sk::after, .status.busy::before { animation:none } }
 </style>
 </head>
 <body>
@@ -317,8 +315,9 @@ const store = {
 let knownRepos = new Set(store.get("knownRepos", []));
 let localRepos = new Map();
 const skRows = (n) => Array.from({ length: n }, () => `<div class="sk sk-row"></div>`).join("");
+const skNum = (short) => `<div class="n"><b class="sk">00</b><span>${short}</span><span class="avg">&nbsp;</span></div>`;
 function skeletons() {
-  $("#tiles").innerHTML = ["Today","Yesterday","Last 7 days","Last 30 days","Custom"].map((l) => `<div class="tile"><div class="label">${l}</div><div class="nums">${SERIES.map(([, , , short]) => `<div class="n"><b class="sk">00</b><span>${short}</span><span class="avg">&nbsp;</span></div>`).join("")}</div></div>`).join("");
+  $("#tiles").innerHTML = ["Today","Yesterday","Last 7 days","Last 30 days","Custom"].map((l) => `<div class="tile"><div class="label">${l}</div><div class="nums">${SERIES.map(([, , , short]) => skNum(short)).join("")}</div></div>`).join("");
   $("#legend").innerHTML = SERIES.map(([, n, c]) => `<span><span class="dot" style="background:${c}"></span>${n}</span>`).join("");
   $("#issueList").innerHTML = skRows(6);
   $("#prList").innerHTML = skRows(5);
@@ -347,9 +346,9 @@ if (listFilter.issues === "all") listFilter.issues = "open";
 const HIST_DAYS = 30;
 let chartH = store.get("chartH", 280);
 $("#chartDetails").open = store.get("chartOpen", false);
-$("#chartDetails").addEventListener("toggle", () => { store.set("chartOpen", $("#chartDetails").open); if ($("#chartDetails").open && daily) drawChart(currentRange().from, currentRange().to); });
+$("#chartDetails").addEventListener("toggle", () => { store.set("chartOpen", $("#chartDetails").open); drawChart(currentRange().from, currentRange().to); });
 function renderChartSize() { document.querySelectorAll("#chartSize button").forEach((b) => b.setAttribute("aria-pressed", Number(b.dataset.h) === chartH)); $("#chart").setAttribute("height", chartH); }
-document.querySelectorAll("#chartSize button").forEach((b) => b.onclick = () => { chartH = Number(b.dataset.h); store.set("chartH", chartH); renderChartSize(); if (daily) drawChart(currentRange().from, currentRange().to); });
+document.querySelectorAll("#chartSize button").forEach((b) => b.onclick = () => { chartH = Number(b.dataset.h); store.set("chartH", chartH); renderChartSize(); drawChart(currentRange().from, currentRange().to); });
 renderChartSize();
 
 const visible = (repo) => selectedRepos === null || selectedRepos.has(repo.toLowerCase());
@@ -385,7 +384,7 @@ document.addEventListener("click", (e) => { if (!$("#repoMenu").contains(e.targe
 
 let live = null, daily = null;
 async function api(path) { const r = await fetch(path); const j = await r.json(); if (!r.ok) throw Object.assign(new Error(j.error || r.statusText), { status: r.status, until: j.until }); return j; }
-function setStatus(t, err, busy) { $("#status").textContent = t; $("#status").className = "status" + (err ? " err" : "") + (busy ? " busy" : ""); document.body.classList.toggle("busy", Boolean(busy)); }
+function setStatus(t, err, busy) { $("#status").textContent = t; $("#status").className = "status" + (err ? " err" : "") + (busy ? " busy" : ""); }
 
 function currentRange() {
   const t = today();
@@ -417,28 +416,48 @@ async function loadLive(button) {
   catch (e) { setStatus("Live lists failed: " + e.message, true); }
   finally { if (button) { button.disabled = false; button.textContent = "Refresh list"; } }
 }
+// Whether every day a window's numbers need is loaded: a single-day tile also reads the
+// day it compares against.
+const has = (from, to) => Loads.holds(daily, from === to ? [prevDay(from), from] : daysBetween(from, to));
 // A forced refresh can take a minute, so the timed poll skips while any load is running,
-// only the newest request's answer is shown, and a plain load of the range a refresh is
-// fetching waits for that refresh (loads.js).
-let dailySeq = 0, dailyBusy = 0;
+// and a plain load of the range a refresh is fetching waits for that refresh (loads.js).
+// Every answer is kept (Loads.hold), so numbers already known stay on screen while
+// another range loads; only the newest tile pick's request sets the status line.
+let asked = 0, dailySeq = 0, dailyBusy = 0;
 const dailyFetch = Loads.refreshSharing((range, force) => api(`/api/daily?${range}${force ? "&force=1" : ""}`));
+function keepDaily(d, seq) {
+  daily = Loads.hold(daily, d, seq);
+  const repos = new Set(); for (const m of Object.values(d.metrics)) for (const l of Object.values(m)) for (const i of l) repos.add(i.repo);
+  noteRepos([...repos]); renderDaily();
+}
 async function loadDaily(force, timed) {
   if (timed && dailyBusy) return;
-  const { from, to } = fetchRange(), seq = ++dailySeq;
+  const { from, to } = fetchRange(), seq = dailySeq = ++asked;
   setStatus("Loading activity", false, true);
   dailyBusy++;
   try { const d = await dailyFetch(`from=${from}&to=${to}`, force);
+    keepDaily(d, seq);
     if (seq !== dailySeq) return;
-    daily = d;
-    const repos = new Set(); for (const m of Object.values(daily.metrics)) for (const l of Object.values(m)) for (const i of l) repos.add(i.repo);
-    noteRepos([...repos]); renderDaily(); renderLive();
     const at = `Updated ${new Date().toLocaleTimeString([], {hour:"numeric", minute:"2-digit"})}`;
     const plural = (n, w) => `${n} ${w}${n > 1 ? "s" : ""}`;
     if (d.stale?.length) setStatus(`${at}, but GitHub search kept answering wrong for ${plural(d.stale.length, "range")}; showing saved counts there`, true);
     else if (d.pending?.length) setStatus(`${at}; GitHub found nothing for ${plural(d.pending.length, "day")} that had items, which can't be checked yet, so saved counts show until it's confirmed`, true);
-    else setStatus(at); }
+    else setStatus(at);
+    fillCustom(); }
   catch (e) { if (seq === dailySeq) setStatus("Activity failed: " + e.message, true); }
   finally { dailyBusy--; }
+}
+// The Custom tile shows its counts while another tile is picked, so a range of its own
+// reaching past what that tile loaded loads next. Quietly: the tile's shimmer is its
+// loading state, and the status line keeps the picked tile's news.
+let filling = null;
+async function fillCustom() {
+  const c = customWindow(), key = `from=${prevDay(c.from)}&to=${c.to}`;
+  if (has(c.from, c.to) || filling === key) return;
+  const seq = ++asked, owner = dailySeq; filling = key; dailyBusy++;
+  try { keepDaily(await dailyFetch(key, false), seq); }
+  catch (e) { if (owner === dailySeq) setStatus("Custom range failed: " + e.message, true); }
+  finally { if (filling === key) filling = null; dailyBusy--; }
 }
 
 function inflightIssue(i) { return i.linkedPrs.length > 0; }
@@ -451,12 +470,14 @@ function prPhase(p) {
   return ["In review", "pill flight"];
 }
 const itemKey = (i) => `${i.repo}#${i.number}`;
+// null while the window's days aren't loaded, so a count reads as loading, not as 0.
 function recent(metric, win) {
-  if (!daily) return [];
   const t = today(), [from, to] = win || [shift(t, -(HIST_DAYS - 1)), t], m = new Map();
+  if (!Loads.holds(daily, daysBetween(from, to))) return null;
   for (const i of itemsIn(metric, from, t)) if (i.day <= to && !m.has(itemKey(i))) m.set(itemKey(i), i);
   return [...m.values()];
 }
+const shownCount = (list) => (list ? list.length : `<span class="sk sk-n">0</span>`);
 const inWindow = (iso, win) => { const k = dayKey(new Date(iso)); return k >= win[0] && k <= win[1]; };
 function renderLive() {
   if (!live) return;
@@ -465,28 +486,31 @@ function renderLive() {
   $("#issueWin").checked = winOnly.issues; $("#prWin").checked = winOnly.prs;
   const openIssues = live.issues.filter((i) => visible(i.repo) && (!winOnly.issues || inWindow(i.updated_at, win))).sort((a,b) => b.updated_at.localeCompare(a.updated_at));
   const inflight = openIssues.filter(inflightIssue);
-  const closedIssues = recent("issuesClosed", winOnly.issues ? win : null).filter((i) => i.state === "closed").sort((a,b) => b.closed_at.localeCompare(a.closed_at));
+  // Closed and merged come from the activity days, so a list stays null (shown loading)
+  // until the days it reads are loaded.
+  const closedIssues = recent("issuesClosed", winOnly.issues ? win : null)?.filter((i) => i.state === "closed").sort((a,b) => b.closed_at.localeCompare(a.closed_at)) ?? null;
   const issueSets = { open: openIssues, inflight, closed: closedIssues };
-  $("#issueSub").textContent = winOnly.issues ? `${winLabel}: open items updated in window, closed items closed in window` : `${inflight.length} in flight, ${openIssues.length - inflight.length} not started, ${closedIssues.length} closed in ${HIST_DAYS}d`;
-  document.querySelectorAll("#issueFilter button").forEach((b) => { b.setAttribute("aria-pressed", b.dataset.f === listFilter.issues); b.textContent = `${{open:"Open",inflight:"In flight",closed:"Closed"}[b.dataset.f]} ${issueSets[b.dataset.f].length}`; });
-  const issues = issueSets[listFilter.issues];
-  $("#issueList").innerHTML = issues.length ? `<table><thead><tr><th>Issue</th><th>Progress</th><th class="num">${listFilter.issues === "closed" ? "Closed" : "Updated"}</th></tr></thead><tbody>` +
+  $("#issueSub").textContent = winOnly.issues ? `${winLabel}: open items updated in window, closed items closed in window` : `${inflight.length} in flight, ${openIssues.length - inflight.length} not started, ${closedIssues?.length ?? "…"} closed in ${HIST_DAYS}d`;
+  document.querySelectorAll("#issueFilter button").forEach((b) => { b.setAttribute("aria-pressed", b.dataset.f === listFilter.issues); b.innerHTML = `${{open:"Open",inflight:"In flight",closed:"Closed"}[b.dataset.f]} ${shownCount(issueSets[b.dataset.f])}`; });
+  const issues = issueSets[listFilter.issues] || [];
+  $("#issueList").innerHTML = !issueSets[listFilter.issues] ? skRows(6) : issues.length ? `<table><thead><tr><th>Issue</th><th>Progress</th><th class="num">${listFilter.issues === "closed" ? "Closed" : "Updated"}</th></tr></thead><tbody>` +
     issues.map((i) => `<tr><td><div class="item"><span class="repo">${esc(i.repo)} #${i.number}</span><a class="title" href="${i.url}"${tt(i.title)} target="_blank">${esc(i.title)}</a></div></td>
       <td>${i.state === "closed" ? `<span class="pill">${i.state_reason === "not_planned" ? "Not planned" : "Closed"}</span>` : inflightIssue(i) ? i.linkedPrs.map((p) => `<a class="pill flight" href="${p.url}"${tt(p.title)} target="_blank">PR #${p.number}${p.draft ? " draft" : ""}</a>`).join("") : `<span class="pill">Not started</span>`}${(i.labels || []).map((l) => `<span class="pill">${esc(l.name)}</span>`).join("")}</td>
       <td class="num when">${ago(i.closed_at && i.state === "closed" ? i.closed_at : i.updated_at || i.created_at)}</td></tr>`).join("") + "</tbody></table>" : `<div class="empty">Nothing here in the selected repos.</div>`;
 
   const openPrs = live.prs.filter((p) => visible(p.repo) && (!winOnly.prs || inWindow(p.updated_at, win))).sort((a,b) => b.updated_at.localeCompare(a.updated_at));
   const drafts = openPrs.filter((p) => p.draft).length;
-  const mergedPrs = recent("prsMerged", winOnly.prs ? win : null).filter((p) => p.merged_at).sort((a,b) => b.merged_at.localeCompare(a.merged_at));
-  const prSets = { open: openPrs, merged: mergedPrs, all: [...openPrs, ...mergedPrs] };
-  $("#prSub").textContent = winOnly.prs ? `${winLabel}: open PRs updated in window, merged PRs merged in window` : `${openPrs.length - drafts} in review, ${drafts} draft, ${mergedPrs.length} merged in ${HIST_DAYS}d`;
-  document.querySelectorAll("#prFilter button").forEach((b) => { b.setAttribute("aria-pressed", b.dataset.f === listFilter.prs); b.textContent = `${{all:"All",open:"Open",merged:"Merged"}[b.dataset.f]} ${prSets[b.dataset.f].length}`; });
+  const mergedPrs = recent("prsMerged", winOnly.prs ? win : null)?.filter((p) => p.merged_at).sort((a,b) => b.merged_at.localeCompare(a.merged_at)) ?? null;
+  const prSets = { open: openPrs, merged: mergedPrs, all: mergedPrs && [...openPrs, ...mergedPrs] };
+  $("#prSub").textContent = winOnly.prs ? `${winLabel}: open PRs updated in window, merged PRs merged in window` : `${openPrs.length - drafts} in review, ${drafts} draft, ${mergedPrs?.length ?? "…"} merged in ${HIST_DAYS}d`;
+  document.querySelectorAll("#prFilter button").forEach((b) => { b.setAttribute("aria-pressed", b.dataset.f === listFilter.prs); b.innerHTML = `${{all:"All",open:"Open",merged:"Merged"}[b.dataset.f]} ${shownCount(prSets[b.dataset.f])}`; });
   const allIssues = live.issues.filter((i) => visible(i.repo)), allPrs = live.prs.filter((p) => visible(p.repo));
   $("#hdrCounts").innerHTML = `<a href="#issues"><b>${allIssues.length}</b>issues, ${allIssues.filter(inflightIssue).length} in flight</a><a href="#prs"><b>${allPrs.length}</b>PRs, ${allPrs.filter((p) => !p.draft).length} in review</a>`;
-  $("#issueCount").textContent = issueSets[listFilter.issues].length; $("#prCount").textContent = prSets[listFilter.prs].length;
+  $("#issueCount").textContent = issueSets[listFilter.issues]?.length ?? "…"; $("#prCount").textContent = prSets[listFilter.prs]?.length ?? "…";
   if (!daily) $("#status").textContent = "Loading activity";
-  const prs = prSets[listFilter.prs];
-  $("#prList").innerHTML = prs.length ? prTable(prs) : `<div class="empty">No pull requests here in the selected repos.</div>`;
+  // "All" shows the open PRs at once and its merged rows as loading until they are.
+  const prs = prSets[listFilter.prs] || (listFilter.prs === "all" ? openPrs : []), prsLoading = !prSets[listFilter.prs];
+  $("#prList").innerHTML = (prs.length ? prTable(prs) : prsLoading ? "" : `<div class="empty">No pull requests here in the selected repos.</div>`) + (prsLoading ? skRows(3) : "");
   renderPickup();
   const rr = live.reviewRequests.filter((p) => visible(p.repo));
   $("#rrSummary").textContent = `Waiting on my review (${rr.length})`;
@@ -518,8 +542,9 @@ function presetSelect() {
   const opt = (v, text) => `<option value="${v}"${(customPreset || "dates") === v ? " selected" : ""}>${text}</option>`;
   return `<select class="preset" id="preset" aria-label="Custom range">${Dates.PRESETS.map(([id, text]) => opt(id, text)).join("")}${opt("dates", "Custom dates")}</select>`;
 }
+// Each tile shows its numbers as soon as the days it reads are loaded, and shimmers only
+// while they aren't, so a load of one range never hides what another already knows.
 function renderDaily() {
-  if (!daily) return;
   const r = currentRange();
   const windows = [["today","Today"],["yesterday","Yesterday"],["7d","Last 7 days"],["30d","Last 30 days"],["custom","Custom"]];
   $("#workWeek").checked = workWeek;
@@ -528,13 +553,13 @@ function renderDaily() {
     const customMeta = `<span class="datelink"><a href="#" data-pick="from">${fmtRangeDay(from, to)}</a> to <a href="#" data-pick="to">${fmtRangeDay(to, from)}</a><input type="date" id="from" value="${from}" max="${today()}" aria-label="From" tabindex="-1"><input type="date" id="to" value="${to}" max="${today()}" aria-label="To" tabindex="-1"></span>`;
     return `<div class="tile${id === "custom" ? " custom" : ""}" role="button" tabindex="0" data-tile="${id}" aria-pressed="${activeTile === id}">
     <div class="label">${id === "custom" ? presetSelect() : `<span class="lt">${label}</span>`}<em>${id === "custom" ? customMeta + (workWeek && nDays > 1 ? ` · ${divDays} work day${divDays === 1 ? "" : "s"}` : "") : nDays > 1 ? (workWeek ? `${divDays} work day${divDays === 1 ? "" : "s"}` : `${nDays} days`) : fmtDay(from)}</em></div>${dates}
-    <div class="nums">${SERIES.map(([m, , col, short]) => { const n = countIn(m, from, to); let tail = "&nbsp;", cls = "";
+    <div class="nums">${SERIES.map(([m, , col, short]) => { if (!has(from, to)) return skNum(short); const n = countIn(m, from, to); let tail = "&nbsp;", cls = "";
       if (nDays > 1) tail = divDays ? `${fmtAvg(n / divDays)}<em>/day</em>` : `<em>no work days</em>`;
       else { const pd = prevDay(from), prev = countIn(m, pd, pd), d = n - prev; cls = d > 0 ? "up" : d < 0 ? "down" : "flat"; tail = `${d > 0 ? "+" : d < 0 ? "−" : "±"}${Math.abs(d)}<em> ${pd === shift(from, -1) ? "yday" : "prev"}</em>`; }
       return `<div class="n"><b>${n}</b><span>${short}</span><span class="avg ${cls}">${tail}</span></div>`; }).join("")}</div></div>`; }).join("");
-  const pick = (id) => { if (activeTile === id) return; activeTile = id; store.set("activeTile", activeTile); loadDaily(); };
+  const pick = (id) => { if (activeTile === id) return; activeTile = id; store.set("activeTile", activeTile); renderDaily(); loadDaily(); };
   document.querySelectorAll(".tile").forEach((b) => { b.onclick = (e) => { if (e.target.closest(".dates, .datelink, .preset")) return; pick(b.dataset.tile); }; b.onkeydown = (e) => { if ((e.key === "Enter" || e.key === " ") && !e.target.closest(".dates, .preset")) { e.preventDefault(); pick(b.dataset.tile); } }; });
-  const useCustom = () => { store.set("customPreset", customPreset); store.set("customRange", customRange); activeTile = "custom"; store.set("activeTile", activeTile); loadDaily(); };
+  const useCustom = () => { store.set("customPreset", customPreset); store.set("customRange", customRange); activeTile = "custom"; store.set("activeTile", activeTile); renderDaily(); loadDaily(); };
   const applyDates = () => { const f = $("#from").value, t = $("#to").value; if (!f || !t) return; customRange = f <= t ? { from: f, to: t } : { from: t, to: f }; customPreset = null; useCustom(); };
   // Choosing "Custom dates" keeps the range on screen, now fixed. On the Custom tile that
   // range is already loaded, so it opens the picker without reloading, which would redraw
@@ -553,8 +578,10 @@ function renderDaily() {
 
 function drawChart(from, to) {
   if (!$("#chartDetails").open) return;
-  const days = []; for (let d = from; d <= to; d = shift(d, 1)) days.push(d);
-  const data = days.map((d) => ({ day: d, vals: SERIES.map(([m]) => (daily.metrics[m][d] || []).filter((i) => visible(i.repo)).length) }));
+  const days = daysBetween(from, to);
+  // Days still loading draw as 0, dimmed until they land.
+  $("#chartWrap").classList.toggle("loading", !Loads.holds(daily, days));
+  const data = days.map((d) => ({ day: d, vals: SERIES.map(([m]) => (daily?.metrics[m]?.[d] || []).filter((i) => visible(i.repo)).length) }));
   const max = Math.max(1, ...data.flatMap((r) => r.vals));
   const svg = $("#chart"); const W = svg.clientWidth || 1000, H = chartH, padL = 34, padR = 10, padT = 14, padB = 24;
   const iw = W - padL - padR, ih = H - padT - padB;
@@ -592,7 +619,7 @@ $("#prWin").onchange = (e) => { winOnly.prs = e.target.checked; store.set("winOn
 $("#workWeek").onchange = (e) => { workWeek = e.target.checked; store.set("workWeek", workWeek); renderDaily(); };
 $("#refresh").onclick = () => { loadLive(); loadDaily(true); };
 $("#pickupRefresh").onclick = () => loadLive($("#pickupRefresh"));
-window.addEventListener("resize", () => daily && drawChart(currentRange().from, currentRange().to));
+window.addEventListener("resize", () => drawChart(currentRange().from, currentRange().to));
 function renderAll() { renderLive(); renderDaily(); }
 
 // ---------- pickup order ----------

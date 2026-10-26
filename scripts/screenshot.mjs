@@ -13,7 +13,7 @@ try {
   await page.goto(`http://127.0.0.1:${PORT}`);
   await page.evaluate(() => { localStorage.setItem("ghdash:theme", '"dark"'); localStorage.setItem("ghdash:preset", '"7d"'); localStorage.setItem("ghdash:activeTile", '"7d"'); localStorage.setItem("ghdash:chartH", "150"); });
   await page.reload();
-  await page.waitForFunction(() => document.querySelector("#issueCount").textContent !== "–" && !document.body.classList.contains("busy"), null, { timeout: 30000 });
+  await page.waitForFunction(() => document.querySelector("#issueCount").textContent !== "–" && !document.querySelector("#status.busy"), null, { timeout: 30000 });
   await page.waitForTimeout(500);
   await page.screenshot({ path: "docs/screenshot.png" });
   await browser.close();
