@@ -5,7 +5,7 @@
 // each window needs one piece at a time, in the page's order — Today first — so each
 // tile fills in as soon as its own days land instead of waiting on the whole range.
 // Pieces never overlap, so a forced refresh searches each day once. The order is read
-// again before every piece, so picking a tile or a Custom range mid-load moves it up.
+// again before every piece, so picking Custom mid-load moves it up.
 (function (root, factory) {
   const api = factory();
   if (typeof module === "object" && module.exports) module.exports = api; else root.Loads = api;
@@ -42,6 +42,11 @@
     }
     return pieces;
   }
+
+  // The order the tiles load in: Today, Yesterday, then the wider windows. A picked Custom
+  // tile goes next after Yesterday; the other picks keep this order. The 30-day window
+  // also covers the lists' closed and merged history.
+  const tileOrder = (picked) => (picked === "custom" ? ["today", "yesterday", "custom", "7d", "30d"] : ["today", "yesterday", "7d", "30d", "custom"]);
 
   // fetch(from, to, force) answers { days, metrics, stale, pending }; windows() lists the
   // windows in the order they should load; onAnswer runs after each piece lands and
@@ -91,5 +96,5 @@
       get held() { return held; },
     };
   }
-  return { hold, holds, plan, createLoader };
+  return { hold, holds, plan, createLoader, tileOrder };
 });

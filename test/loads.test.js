@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { hold, holds, plan, createLoader } = require("../public/loads.js");
+const { hold, holds, plan, createLoader, tileOrder } = require("../public/loads.js");
 
 const days = (a, b) => { const out = []; for (let d = a; d <= b; d++) out.push(String(d).padStart(2, "0")); return out; };
 const tick = () => new Promise((r) => setImmediate(r));
@@ -60,7 +60,7 @@ test("the timed poll keeps showing what is held while it checks", async () => {
   assert.equal(s.loader.state(days(1, 2)), "loading", "a day never loaded still reads loading");
 });
 
-test("picking a tile or range mid-load moves its days up, inside the same refresh", async () => {
+test("picking Custom mid-load moves its days up, inside the same refresh", async () => {
   // Subsumes the old refreshSharing regression: a preset change during Refresh used to ask
   // separately, unforced, and its quicker answer hid the refresh's. It now joins the round.
   const w = { list: TILES() }, s = server(w);
@@ -124,4 +124,13 @@ test("an older answer landing late doesn't overwrite a newer one's days", () => 
   assert.equal(held.metrics.prsMerged["10-25"].length, 3, "the older one still fills days the newer didn't fetch");
   held = hold(held, answer(["10-26"], 7), 2);
   assert.equal(held.metrics.prsMerged["10-26"].length, 7, "the same request answering again (a shared refresh) still lands");
+});
+
+test("regression: tiles load Today, Yesterday, 7 and 30 days, then Custom, whichever is picked", () => {
+  // Picking 30 days used to load it straight after Today, ahead of Yesterday.
+  for (const picked of ["today", "yesterday", "7d", "30d"]) assert.deepEqual(tileOrder(picked), ["today", "yesterday", "7d", "30d", "custom"], picked);
+});
+
+test("a picked Custom tile loads right after Today and Yesterday", () => {
+  assert.deepEqual(tileOrder("custom"), ["today", "yesterday", "custom", "7d", "30d"]);
 });
