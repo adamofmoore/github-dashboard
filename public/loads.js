@@ -4,8 +4,10 @@
 // A load (a "round": the page opening, Refresh, or the timed poll) asks for the days
 // each window needs one piece at a time, in the page's order — Today first — so each
 // tile fills in as soon as its own days land instead of waiting on the whole range.
-// Pieces never overlap, so a forced refresh searches each day once. The order is read
-// again before every piece, so picking Custom mid-load moves it up.
+// Pieces never overlap. Refresh re-searches only the first window's (Today's) days, the
+// ones that can still change; the server serves settled days from its cache, and
+// forcing them cost a search per metric per piece, enough to trip GitHub's rate limit.
+// The order is read again before every piece, so picking Custom mid-load moves it up.
 (function (root, factory) {
   const api = factory();
   if (typeof module === "object" && module.exports) module.exports = api; else root.Loads = api;
@@ -67,11 +69,11 @@
       r.running = true; onStatus(r);
       while (round === r) {
         const done = Object.keys(held?.at || {}).filter((d) => held.at[d] >= r.first);
-        const [piece] = plan(windows(), [...done, ...r.failed]);
+        const ws = windows(), [piece] = plan(ws, [...done, ...r.failed]);
         if (!piece) break;
-        const s = ++seq;
+        const s = ++seq, live = new Set(ws[0]);
         try {
-          const a = await fetch(piece[0], piece[piece.length - 1], r.force);
+          const a = await fetch(piece[0], piece[piece.length - 1], r.force && piece.some((d) => live.has(d)));
           held = hold(held, a, s);
           r.stale.push(...(a.stale || [])); r.pending.push(...(a.pending || []));
           onAnswer(a);

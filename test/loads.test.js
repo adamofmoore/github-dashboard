@@ -68,7 +68,7 @@ test("picking Custom mid-load moves its days up, inside the same refresh", async
   w.list = [days(29, 30), days(5, 9), ...TILES()]; s.loader.nudge();
   assert.equal(s.asked.length, 1, "nudging a running load doesn't ask twice at once");
   s.answer(s.asked[0]); await tick();
-  assert.deepEqual([s.asked[1].from, s.asked[1].to, s.asked[1].force], ["05", "09", true]);
+  assert.deepEqual([s.asked[1].from, s.asked[1].to], ["05", "09"], "Custom's days come next, in the same round");
 });
 
 test("a nudge after a load finished asks only for the days it is missing", async () => {
@@ -133,4 +133,13 @@ test("regression: tiles load Today, Yesterday, 7 and 30 days, then Custom, which
 
 test("a picked Custom tile loads right after Today and Yesterday", () => {
   assert.deepEqual(tileOrder("custom"), ["today", "yesterday", "custom", "7d", "30d"]);
+});
+
+test("regression: Refresh re-searches only Today's days; settled days come from the cache", async () => {
+  // Forcing every piece cost a GitHub search per metric per piece (more for small, often
+  // empty pieces), tripped search's rate limit and stalled the page for minutes.
+  const w = { list: TILES() }, s = server(w);
+  s.loader.start({ force: true });
+  for (let i = 0; i < 4; i++) { s.answer(s.asked[i]); await tick(); }
+  assert.deepEqual(s.asked.map((q) => [q.from, q.to, q.force]), [["29", "30", true], ["28", "28", false], ["24", "27", false], ["01", "23", false]]);
 });
