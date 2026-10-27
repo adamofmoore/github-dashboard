@@ -169,6 +169,10 @@ table { table-layout:fixed } th:first-child, td:first-child { width:auto } td.nu
 #pickup .zonebar button { display:inline-flex; align-items:center; gap:7px; border-radius:99px; padding:4px 12px 4px 8px }
 #pickup .zonebar button i { width:8px; height:8px; border-radius:2px; background:var(--zc) }
 #pickup .zonebar button b { font-weight:700 }
+/* The picked category reads as selected and the rest step back, so a filter is never silent. */
+#pickup .zonebar button[aria-pressed=true], #pickup .zonebar button[aria-pressed=true]:hover { border-color:var(--zc); background:color-mix(in srgb, var(--zc) 18%, var(--chip)); box-shadow:0 0 0 1px var(--zc) inset; color:var(--ink); font-weight:600 }
+#pickup .zonebar.filtering button[aria-pressed=false] { opacity:.55 } #pickup .zonebar.filtering button[aria-pressed=false]:hover { opacity:1 }
+#pickup .zonebar button.all { padding:4px 12px; color:var(--ink2) }
 .band { margin:0 0 18px }
 .band-head { display:grid; grid-template-columns:auto auto 1fr; align-items:baseline; gap:10px 12px; padding:0 0 10px }
 .band-head .zone { font-size:12px; font-weight:800; letter-spacing:.08em; color:var(--zc); border:1px solid var(--zc); border-radius:4px; padding:1px 6px }
@@ -614,8 +618,11 @@ function renderPickup() {
   $("#pickupCount").textContent = issues.length;
   $("#pickupStamp").textContent = `Fetched ${ago(live.fetchedAt)} ago`;
   $("#ramp").innerHTML = ZONES.map((zn, z) => `<i style="flex:${inZone[z].length || 0}; background:${zn.color}" title="${zn.z} ${zn.name}: ${inZone[z].length}"></i>`).join("");
-  $("#zonebar").innerHTML = ZONES.map((zn, z) => (z === 0 && !inZone[0].length) ? "" : `<button data-z="${z}" aria-pressed="${zoneFilter === z}" style="--zc:${zn.color}"><i></i>${z === 0 ? "" : zn.z + " · "}${zn.name} <b>${inZone[z].length}</b></button>`).join("");
-  document.querySelectorAll("#zonebar button").forEach((b) => b.onclick = () => { zoneFilter = zoneFilter === Number(b.dataset.z) ? null : Number(b.dataset.z); store.set("zoneFilter", zoneFilter); renderPickup(); });
+  // An empty priority zone is hidden unless it is the filter, so the filter always has its chip.
+  $("#zonebar").classList.toggle("filtering", zoneFilter !== null);
+  $("#zonebar").innerHTML = ZONES.map((zn, z) => (z === 0 && !inZone[0].length && zoneFilter !== 0) ? "" : `<button data-z="${z}" aria-pressed="${zoneFilter === z}" style="--zc:${zn.color}"><i></i>${z === 0 ? "" : zn.z + " · "}${zn.name} <b>${inZone[z].length}</b></button>`).join("") +
+    (zoneFilter === null ? "" : `<button class="all" data-z="">Show all</button>`);
+  document.querySelectorAll("#zonebar button").forEach((b) => b.onclick = () => { const z = b.dataset.z === "" ? null : Number(b.dataset.z); zoneFilter = zoneFilter === z ? null : z; store.set("zoneFilter", zoneFilter); renderPickup(); });
   let rank = 0;
   $("#bands").innerHTML = ZONES.map((zn, z) => {
     const rows = inZone[z]; const start = rank; rank += rows.length;
